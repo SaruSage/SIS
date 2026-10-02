@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<!--
+  ============================================================
+  PROJETO GOLDEN — Página de Cadastro
+  ============================================================
+  O cadastro acontece em DUAS ETAPAS:
+  1. CÓDIGO DE ADESÃO → o candidato informa o código gerado
+     pelo administrador. Enquanto não validar, o formulário
+     completo fica escondido (ninguém se cadastra sem convite).
+  2. FORMULÁRIO → nome, e-mail, senha e CARGO. O envio NÃO
+     cria conta: grava uma "solicitação" no banco com status
+     "pendente". Quem cria a conta de verdade é o administrador,
+     ao aprovar no painel.
+  ============================================================
+-->
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cadastro — Projeto Golden</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <div class="container">
+
+    <h1>Cadastro</h1>
+    <p class="subtitulo">
+      É necessário um código de adesão fornecido pela administração.
+    </p>
+
+    <!-- ======================================================
+         ETAPA 1 — VALIDAÇÃO DO CÓDIGO DE ADESÃO
+         ====================================================== -->
+    <section id="etapa-codigo">
+
+      <label for="codigo">Código de adesão</label>
+      <input
+        type="text"
+        id="codigo"
+        placeholder="Ex.: 547GK58J"
+        autocomplete="off"
+      />
+
+      <button type="button" id="botao-validar-codigo">Validar código</button>
+
+    </section>
+
+    <!-- ======================================================
+         ETAPA 2 — FORMULÁRIO DE CADASTRO
+         Começa escondido (display:none) e só aparece depois
+         que o código for validado com sucesso.
+         ====================================================== -->
+    <form id="form-cadastro" style="display:none;">
+
+      <label for="nome">Nome completo</label>
+      <input type="text" id="nome" required autocomplete="name">
+
+      <label for="email">E-mail</label>
+      <input type="email" id="email" required autocomplete="email">
+
+      <label for="senha">Senha (mínimo 6 caracteres)</label>
+      <input type="password" id="senha" required minlength="6" autocomplete="new-password">
+
+      <label for="confirmar-senha">Confirmar senha</label>
+      <input type="password" id="confirmar-senha" required autocomplete="new-password">
+
+      <!--
+        SELEÇÃO DE CARGO
+        O candidato informa qual função exerce na empresa.
+
+        ⚠️ DECISÃO DE SEGURANÇA: a opção "Administração" NÃO
+        existe aqui DE PROPÓSITO. Se o candidato pudesse se
+        declarar administrador, bastaria um descuido do admin
+        na hora de aprovar para alguém ganhar acesso total ao
+        sistema. Quem define cargos administrativos é o
+        administrador, no painel — na aprovação ou depois,
+        na aba Aprovados.
+
+        O cargo escolhido aqui é apenas uma SUGESTÃO: o
+        administrador pode confirmá-lo ou corrigi-lo ao aprovar.
+      -->
+      <label for="cargo">Cargo na empresa</label>
+      <select id="cargo" required>
+        <option value="" disabled selected>Selecione seu cargo...</option>
+        <option value="estoque">Estoque</option>
+        <option value="vendas">Vendas</option>
+        <option value="producao">Produção</option>
+      </select>
+
+      <button type="submit" id="botao-enviar">Enviar solicitação</button>
+
+    </form>
+
+    <p id="mensagem" class="mensagem"></p>
+
+    <a href="index.html" class="link-voltar">Voltar para o login</a>
+
+  </div>
+
+  <script type="module" src="js/cadastro.js"></script>
+
+</body>
+</html>

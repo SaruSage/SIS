@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<!--
+  ============================================================
+  PROJETO GOLDEN — Homepage (portal de aplicações)
+  ============================================================
+  Estrutura em 3 regiões:
+  1. TOPBAR   → busca, botão de notificações e perfil (direita)
+  2. CONTEÚDO → grade de cards das aplicações
+  3. SIDEBAR  → centro de controle, fixo na lateral direita
+  A página é PROTEGIDA: o home.js só revela tudo depois de
+  confirmar que há um usuário logado. Os cards visíveis
+  dependem do CARGO do usuário (mapa de acesso no home.js).
+  ============================================================
+-->
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Início — Projeto Golden</title>
+  <!--
+    DOIS arquivos de estilo, NESSA ORDEM:
+    1. style.css  → estilos gerais (botões, mensagens, formulários)
+    2. home.css   → estilos exclusivos do portal; entra DEPOIS
+       para sobrescrever o comportamento do body herdado da
+       tela de login (regra da cascata: o último arquivo vence).
+  -->
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/home.css">
+</head>
+<body>
+
+  <!--
+    Tudo começa escondido (classe "oculto"). O home.js remove
+    essa classe só depois da verificação de login passar.
+  -->
+  <div id="conteudo-protegido" class="oculto">
+
+    <!-- ======================================================
+         REGIÃO 1 — TOPBAR (barra superior fixa)
+         ====================================================== -->
+    <header class="topbar">
+
+      <!-- Campo de pesquisa: filtra os cards em tempo real -->
+      <input
+        type="text"
+        id="campo-busca"
+        class="campo-busca"
+        placeholder="Buscar aplicação..."
+        autocomplete="off"
+      />
+
+      <!-- Ações do usuário, agrupadas à direita -->
+      <div class="acoes-usuario">
+
+        <!-- Botão do sino: abre/fecha a caixa de notificações -->
+        <button type="button" id="botao-notificacoes" class="botao-icone" title="Notificações">
+          🔔
+          <!-- Bolinha vermelha de "há notificações não lidas".
+               O JS a esconde quando a caixa é aberta. -->
+          <span id="selo-notificacao" class="selo"></span>
+        </button>
+
+        <!-- Botão do perfil: abre/fecha o menu do perfil -->
+        <button type="button" id="botao-perfil" class="botao-perfil">
+          <span class="avatar" id="avatar">?</span>
+          <span id="nome-usuario">Carregando...</span>
+          <span class="seta">▾</span>
+        </button>
+      </div>
+
+      <!--
+        CAIXA DE NOTIFICAÇÕES
+        Posicionada "absoluta" logo abaixo do sino. Começa
+        escondida; o JS alterna com a classe "aberta".
+      -->
+      <div id="caixa-notificacoes" class="caixa-flutuante">
+        <h3>Notificações</h3>
+        <ul id="lista-notificacoes">
+          <!-- O JS preenche esta lista -->
+        </ul>
+      </div>
+
+      <!--
+        MENU DO PERFIL
+        Mesma mecânica da caixa de notificações, mas ancorado
+        no botão de perfil.
+      -->
+      <div id="menu-perfil" class="caixa-flutuante">
+        <p id="email-usuario" class="texto-ajuda"></p>
+        <button type="button" id="botao-sair" class="botao-secundario">Sair</button>
+      </div>
+
+    </header>
+
+    <!-- ======================================================
+         REGIÕES 2 e 3 — conteúdo principal + sidebar
+         O "layout-principal" divide a tela em duas colunas.
+         ====================================================== -->
+    <div class="layout-principal">
+
+      <!-- REGIÃO 2 — Grade de aplicações -->
+      <main class="area-apps">
+        <h2>Aplicações</h2>
+
+        <!--
+          Cada card é uma "aplicação". O atributo data-nome
+          guarda o texto que a busca usa para filtrar E que o
+          mapa de permissões usa para decidir quem vê o quê.
+          Os cards apontam para páginas que ainda serão criadas.
+        -->
+        <div class="grade-apps" id="grade-apps">
+
+            <a href="estoque.html" class="card-app" data-nome="estoque">
+            <span class="icone-app">📦</span>
+            <span class="titulo-app">Estoque</span>
+            <span class="desc-app">Controle de cabos e materiais</span>
+          </a>
+
+          <a href="#" class="card-app" data-nome="vendas">
+            <span class="icone-app">💰</span>
+            <span class="titulo-app">Vendas</span>
+            <span class="desc-app">Registro de orçamentos e vendas</span>
+          </a>
+
+          <a href="#" class="card-app" data-nome="producao">
+            <span class="icone-app">🔧</span>
+            <span class="titulo-app">Produção</span>
+            <span class="desc-app">Ordens de serviço e montagem</span>
+          </a>
+
+          <a href="#" class="card-app" data-nome="consultoria">
+            <span class="icone-app">📋</span>
+            <span class="titulo-app">Consultoria</span>
+            <span class="desc-app">Projetos e atendimentos técnicos</span>
+          </a>
+
+        </div>
+
+        <!-- Mensagem exibida quando a busca não encontra nada -->
+        <p id="sem-resultados" class="texto-ajuda" style="display:none;">
+          Nenhuma aplicação encontrada.
+        </p>
+      </main>
+
+      <!-- REGIÃO 3 — Centro de controle (lateral direita) -->
+      <aside class="centro-controle">
+        <h3>Centro de controle</h3>
+
+        <div class="item-controle">
+          <span class="rotulo-controle">Usuários ativos</span>
+          <span class="valor-controle" id="contagem-usuarios">—</span>
+        </div>
+
+        <div class="item-controle">
+          <span class="rotulo-controle">Solicitações pendentes</span>
+          <span class="valor-controle" id="contagem-pendentes">—</span>
+        </div>
+
+        <!-- Atalho: só aparece para administradores -->
+        <a href="adm.html" id="atalho-admin" class="atalho-admin" style="display:none;">
+          Abrir painel administrativo →
+        </a>
+      </aside>
+
+    </div>
+
+  </div>
+
+  <script type="module" src="js/home.js"></script>
+
+</body>
+</html>

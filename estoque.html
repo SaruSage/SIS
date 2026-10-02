@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<!--
+  ============================================================
+  PROJETO GOLDEN — Módulo de Estoque (versão 5)
+  ============================================================
+  ⚠️ ALTERAÇÕES DESTA VERSÃO:
+  1. BARRA DE CONTROLES DA TABELA: a busca agora divide a linha
+     com um seletor "Ordenar por" (7 opções) e um botão ☰
+     (menu sanduíche) com "Resetar tabela" e "Editar categorias".
+  2. CATEGORIAS DINÂMICAS: a lista de categorias do cadastro NÃO
+     é mais fixa no HTML — o estoque.js a preenche a partir da
+     coleção "categorias" do banco, criada pelo usuário no
+     gerenciador de categorias.
+  ============================================================
+-->
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Estoque — Projeto Golden</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/estoque.css">
+</head>
+<body>
+
+  <!--
+    Tudo começa escondido. O estoque.js remove a classe "oculto"
+    somente depois de confirmar que o usuário logado tem cargo
+    de Estoque ou Administração.
+  -->
+  <div id="conteudo-protegido" class="oculto">
+
+    <header class="cabecalho-modulo">
+      <span class="saudacao-header">
+        Logado como <strong id="nome-usuario">...</strong>
+      </span>
+
+      <div class="acoes-cabecalho">
+        <button type="button" id="botao-voltar" class="botao-icone-header" title="Voltar">
+          ←
+        </button>
+
+        <div class="perfil-wrapper">
+          <button type="button" id="botao-perfil" class="botao-icone-header" title="Perfil">
+            <span id="avatar" class="avatar-header">?</span>
+          </button>
+
+          <div id="menu-perfil" class="menu-flutuante">
+            <button type="button" id="item-configuracoes" class="item-menu-perfil">
+              ⚙️ Configurações
+            </button>
+            <button type="button" id="item-sair" class="item-menu-perfil item-sair">
+              🚪 Sair
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <p id="acesso-negado" class="mensagem erro" style="display:none;">
+      Esta área é restrita aos setores de Estoque e Administração.
+    </p>
+
+    <div id="conteudo-estoque" style="display:none;">
+
+      <div class="layout-estoque">
+
+        <!-- ============ MENU LATERAL ESQUERDO ============ -->
+        <nav class="menu-lateral">
+          <button type="button" class="item-menu ativo" data-painel="estoque">
+            📦 Estoque
+          </button>
+          <button type="button" class="item-menu" data-painel="cadastrar">
+            ➕ Cadastrar
+          </button>
+          <button type="button" class="item-menu" data-painel="entrada">
+            ⬇️ Entrada
+          </button>
+          <button type="button" class="item-menu" data-painel="saida">
+            ⬆️ Saída
+          </button>
+          <button type="button" class="item-menu" data-painel="historico">
+            📜 Histórico
+          </button>
+        </nav>
+
+        <!-- ============ ÁREA DE CONTEÚDO (direita) ============ -->
+        <main class="area-conteudo">
+
+          <!-- PAINEL 1: ESTOQUE (tabela + controles) — padrão -->
+          <section id="painel-estoque" class="painel visivel">
+            <h2>Produtos em estoque</h2>
+
+            <!--
+              BARRA DE CONTROLES (NOVA)
+              Uma linha flexível com três elementos:
+              1. Busca (ocupa o espaço que sobrar — flex:1)
+              2. Seletor "Ordenar por" — 7 critérios; o JS reordena
+                 e redesenha a tabela a cada troca.
+              3. Botão ☰ (menu sanduíche) — abre o menu com
+                 "Resetar tabela" e "Editar categorias".
+            -->
+            <div class="controles-tabela">
+
+              <input
+                type="text"
+                id="busca-produto"
+                class="campo-busca-interno"
+                placeholder="Buscar por código, nome, categoria ou descrição..."
+                autocomplete="off"
+              />
+
+              <!--
+                ORDENAR POR
+                O atributo "value" de cada opção é o código que o
+                estoque.js usa no switch de ordenação.
+              -->
+              <select id="ordenar-por" class="seletor-ordenacao" title="Ordenar por">
+                <option value="codigo" selected>Código (padrão)</option>
+                <option value="alfabetica">Ordem alfabética</option>
+                <option value="numerica">Ordem numérica</option>
+                <option value="categoria">Categoria</option>
+                <option value="maiorQtd">Maior quantidade</option>
+                <option value="menorQtd">Menor quantidade</option>
+                <option value="edicaoRecente">Edição mais recente</option>
+                <option value="edicaoAntiga">Edição mais antiga</option>
+              </select>
+
+              <!--
+                MENU SANDUÍCHE
+                Mesma mecânica do menu de perfil: wrapper com
+                position:relative, menu flutuante escondido que o
+                JS revela com a classe "aberta".
+              -->
+              <div class="sanduiche-wrapper">
+                <button type="button" id="botao-menu-tabela" class="botao-sanduiche" title="Opções">
+                  ☰
+                </button>
+
+                <div id="menu-tabela" class="menu-flutuante menu-tabela">
+                  <button type="button" id="item-resetar" class="item-menu-perfil">
+                    🔄 Resetar tabela
+                  </button>
+                  <button type="button" id="item-editar-categorias" class="item-menu-perfil">
+                    🏷️ Editar categorias
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="wrapper-tabela">
+              <table class="tabela-produtos">
+                <thead>
+                  <tr>
+                    <th>Foto</th>
+                    <th>Código</th>
+                    <th>Nome</th>
+                    <th>Categoria</th>
+                    <th>Qtd.</th>
+                    <th>Descrição</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="corpo-tabela">
+                  <!-- O JS preenche as linhas -->
+                </tbody>
+              </table>
+            </div>
+
+            <p id="sem-produtos" class="texto-ajuda" style="display:none;">
+              Nenhum produto encontrado para a busca.
+            </p>
+          </section>
+
+          <!-- PAINEL 2: CADASTRAR -->
+          <section id="painel-cadastrar" class="painel">
+            <h2>Cadastrar produto</h2>
+
+            <form id="form-produto">
+
+              <label for="foto-produto">Foto do produto (opcional)</label>
+              <input type="file" id="foto-produto" accept="image/*">
+              <img id="preview-foto" class="preview-foto" style="display:none;" alt="Pré-visualização">
+
+              <label for="codigo-produto">Código (ex.: 11.111-CG — pode digitar só números e letras)</label>
+              <input
+                type="text"
+                id="codigo-produto"
+                placeholder="11111CG vira 11.111-CG"
+                maxlength="9"
+                autocomplete="off"
+                required
+              />
+
+              <label for="nome-produto">Nome do produto</label>
+              <input
+                type="text"
+                id="nome-produto"
+                placeholder="Ex.: Cabo flexível 2,5mm²"
+                required
+              />
+
+              <!--
+                CATEGORIA (obrigatória) — as opções NÃO estão mais
+                escritas aqui: o estoque.js preenche este seletor
+                com as categorias criadas no gerenciador.
+              -->
+              <label for="categoria-produto">Categoria</label>
+              <select id="categoria-produto" required>
+                <option value="" disabled selected>Carregando categorias...</option>
+              </select>
+
+              <label for="descricao-produto">Descrição</label>
+              <input
+                type="text"
+                id="descricao-produto"
+                placeholder="Ex.: Rolo de 100m, cobre nu, 750V"
+                required
+              />
+
+              <div class="linha-campos">
+                <div>
+                  <label for="quantidade-produto">Quantidade inicial</label>
+                  <input type="number" id="quantidade-produto" min="1" step="1" required>
+                </div>
+                <div>
+                  <label for="valor-produto">Custo unitário (R$) — opcional</label>
+                  <input type="number" id="valor-produto" min="0" step="0.01">
+                </div>
+                <div>
+                  <label for="peso-produto">Peso unitário (kg) — opcional</label>
+                  <input type="number" id="peso-produto" min="0" step="0.001">
+                </div>
+              </div>
+
+              <button type="submit" id="botao-cadastrar-produto">Cadastrar produto</button>
+            </form>
+          </section>
+
+          <!-- PAINEL 3: ENTRADA -->
+          <section id="painel-entrada" class="painel">
+            <h2>Entrada no estoque</h2>
+            <p class="texto-ajuda">
+              Registre material chegando. O saldo do produto é somado
+              automaticamente e o histórico é atualizado.
+            </p>
+
+            <form id="form-entrada" class="form-movimento">
+              <label for="entrada-produto">Produto</label>
+              <select id="entrada-produto" required>
+                <option value="" disabled selected>Selecione o produto...</option>
+              </select>
+
+              <label for="entrada-quantidade">Quantidade</label>
+              <input type="number" id="entrada-quantidade" min="1" step="1" required>
+
+              <label for="entrada-origem">Origem (de onde veio)</label>
+              <input type="text" id="entrada-origem" placeholder="Ex.: Fornecedor Cabos Brasil" required>
+
+              <label for="entrada-pedido">Pedido relacionado (opcional)</label>
+              <input type="text" id="entrada-pedido" placeholder="Ex.: PED-2026-001" autocomplete="off">
+
+              <button type="submit" id="botao-entrada">Registrar entrada</button>
+            </form>
+          </section>
+
+          <!-- PAINEL 4: SAÍDA -->
+          <section id="painel-saida" class="painel">
+            <h2>Saída do estoque</h2>
+            <p class="texto-ajuda">
+              Registre material saindo. O sistema recusa saídas maiores
+              que o saldo disponível.
+            </p>
+
+            <form id="form-saida" class="form-movimento">
+              <label for="saida-produto">Produto</label>
+              <select id="saida-produto" required>
+                <option value="" disabled selected>Selecione o produto...</option>
+              </select>
+
+              <label for="saida-quantidade">Quantidade</label>
+              <input type="number" id="saida-quantidade" min="1" step="1" required>
+
+              <label for="saida-destino">Destino (para onde vai)</label>
+              <input type="text" id="saida-destino" placeholder="Ex.: Cliente Silva / Obra Rodovia" required>
+
+              <label for="saida-pedido">Pedido relacionado (opcional)</label>
+              <input type="text" id="saida-pedido" placeholder="Ex.: PED-2026-002" autocomplete="off">
+
+              <button type="submit" id="botao-saida">Registrar saída</button>
+            </form>
+          </section>
+
+          <!-- PAINEL 5: HISTÓRICO -->
+                    <section id="painel-historico" class="painel">
+            <h2>Histórico de movimentações</h2>
+            <p class="texto-ajuda">
+              Registro completo: o mais recente aparece primeiro.
+              Inclui entradas, saídas, edições e exclusões de produto.
+            </p>
+
+            <!--
+              BARRA DE FILTROS DO HISTÓRICO (NOVA)
+              Busca por código ou nome do produto + seletor de tipo.
+              Os dois filtros se COMBINAM: buscar "11.111-CG" com o
+              seletor em "Saídas" mostra apenas as saídas desse produto.
+            -->
+            <div class="controles-historico">
+              <input
+                type="text"
+                id="busca-historico"
+                class="campo-busca-historico"
+                placeholder="Buscar por código ou nome do produto..."
+                autocomplete="off"
+              />
+
+                <select id="filtro-historico" class="seletor-filtro-historico" title="Filtrar por tipo">
+                <option value="todas" selected>Todas</option>
+                <option value="entrada">Entradas</option>
+                <option value="saida">Saídas</option>
+                <option value="edicao">Edições</option>
+                <option value="exclusao">Exclusões</option>
+              </select>
+            </div>
+
+            <div id="lista-historico">
+              <p class="texto-ajuda">Nenhuma movimentação registrada ainda.</p>
+            </div>
+          </section>
+
+        </main>
+      </div>
+
+    </div>
+
+    <p id="mensagem" class="mensagem"></p>
+
+  </div>
+
+  <!-- MODAL GENÉRICO — o JS preenche o conteúdo conforme a ação -->
+  <div id="modal-overlay" class="modal-overlay" style="display:none;">
+    <div id="modal-conteudo" class="modal-conteudo">
+      <!-- O JS preenche este conteúdo -->
+    </div>
+  </div>
+
+  <script type="module" src="js/estoque.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,665 @@
+/* ============================================================
+   PROJETO GOLDEN — Estilos exclusivos do módulo de Estoque
+   VERSÃO CONSOLIDADA — fonte única de verdade.
+   Cada seletor aparece UMA ÚNICA VEZ neste arquivo. Se precisar
+   alterar algum estilo no futuro, edite aqui — nunca cole blocos
+   duplicados no fim do arquivo (a última regra vence e causa
+   conflitos de alinhamento).
+   ============================================================ */
+
+/* ---------- RESET: desfaz o estilo de login no body ---------- */
+body {
+  display: block;
+  justify-content: initial;
+  align-items: initial;
+  min-height: initial;
+  margin: 0;
+  background: #f4f6fa;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Conteúdo escondido até a verificação de cargo passar */
+.oculto { display: none; }
+
+/* ---------- CABEÇALHO (compacto) ---------- */
+.cabecalho-modulo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1e3c72;
+  color: #fff;
+  padding: 8px 20px;
+}
+
+/* Saudação à esquerda: "Logado como Fulano" */
+.saudacao-header {
+  font-size: 14px;
+  color: #cdd8ee;
+}
+
+.saudacao-header strong {
+  color: #fff;
+}
+
+/* Grupo de ações à direita: voltar + perfil */
+.acoes-cabecalho {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Botões redondos do cabeçalho (voltar e avatar).
+   flex + width/height + aspect-ratio travam a forma: círculo
+   perfeito, imune a esticamentos. */
+.botao-icone-header {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  background: rgba(255,255,255,0.12);
+  border: none;
+  border-radius: 50%;
+  font-size: 16px;
+  cursor: pointer;
+  color: #fff;
+}
+
+.botao-icone-header:hover { background: rgba(255,255,255,0.25); }
+
+/* Avatar com a inicial do usuário */
+.avatar-header {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+/* Wrapper do perfil: referência para o menu flutuante */
+.perfil-wrapper {
+  position: relative;
+}
+
+/* ---------- MENUS FLUTUANTES (perfil e sanduíche) ---------- */
+.menu-flutuante {
+  position: absolute;
+  top: 44px;
+  right: 0;
+  width: 190px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  padding: 6px;
+  display: none;          /* escondido por padrão */
+  z-index: 200;
+}
+
+/* A classe .aberta (controlada pelo JS) revela o menu */
+.menu-flutuante.aberta { display: block; }
+
+.item-menu-perfil {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+}
+
+.item-menu-perfil:hover { background: #f0f4fa; }
+
+/* Opção "Sair" em tom de alerta */
+.item-sair { color: #b3261e; }
+
+/* ---------- LAYOUT EM DUAS COLUNAS ---------- */
+/* Menu lateral fixo de 200px + conteúdo que ocupa o resto */
+.layout-estoque {
+  display: flex;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+/* ---------- MENU LATERAL ESQUERDO ---------- */
+.menu-lateral {
+  flex: 0 0 200px;
+  background: #fff;
+  border: 1px solid #e3e8f0;
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;   /* acompanha a rolagem, colado no topo */
+  top: 20px;
+}
+
+/* Cada opção do menu */
+.item-menu {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.item-menu:hover { background: #f0f4fa; }
+
+/* Opção ativa: fundo azul, texto branco */
+.item-menu.ativo {
+  background: #1e3c72;
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ---------- ÁREA DE CONTEÚDO (painéis) ---------- */
+.area-conteudo {
+  flex: 1;
+  min-width: 0;   /* permite a tabela encolher sem estourar */
+}
+
+.painel {
+  display: none;          /* todos os painéis começam ocultos */
+  background: #fff;
+  border: 1px solid #e3e8f0;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+/* Apenas o painel da opção ativa aparece */
+.painel.visivel { display: block; }
+
+.painel h2 {
+  margin: 0 0 12px;
+  font-size: 17px;
+  color: #1e3c72;
+}
+
+/* Três campos lado a lado no cadastro */
+.linha-campos {
+  display: flex;
+  gap: 12px;
+}
+
+.linha-campos > div {
+  flex: 1;
+}
+
+/* ============================================================
+   BARRA DE CONTROLES DA TABELA — BLOCO ÚNICO
+   Proporção: busca 60% · ordenador 25% · sanduíche 15%.
+   O truque é flex-grow PROPORCIONAL (60/25/15) com flex-basis
+   0%: o navegador divide o espaço sobrado depois do gap
+   exatamente nessa proporção — a soma fecha em 100% da linha
+   mesmo com o gap entre os elementos.
+   Altura única de 40px nos três (box-sizing:border-box faz o
+   padding entrar dentro dos 40px) — elimina o efeito "escada".
+   ============================================================ */
+/* ============================================================
+   BARRA DE CONTROLES DA TABELA — v5.3 (alinhamento à prova de
+   navegador). O segredo: align-items: STRETCH no container.
+   Com stretch, os três filhos são ESTICADOS para a mesma
+   altura automaticamente — o navegador não pode mais renderizar
+   o <select> menor que a busca, mesmo com suas peculiaridades
+   nativas de renderização.
+   ============================================================ */
+.controles-tabela {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;      /* ← a correção principal */
+  margin-bottom: 14px;
+}
+
+/* Busca: 60% da linha. A altura de referência é 40px. */
+.controles-tabela .campo-busca-interno {
+  flex: 60 1 0%;
+  min-width: 0;
+  height: 40px;
+  box-sizing: border-box;
+  margin-bottom: 0;
+  padding: 0 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+/* Seletor "Ordenar por": 25% da linha.
+   line-height IGUAL à altura centraliza o texto na vertical —
+   é isso que elimina a sensação de "deslocado para cima". */
+.seletor-ordenacao {
+  flex: 25 1 0%;
+  min-width: 0;
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+  background: #fff;
+  line-height: 38px;         /* 40px menos as 2 bordas */
+  vertical-align: middle;
+}
+
+/* Sanduíche: 15% da linha */
+.sanduiche-wrapper {
+  flex: 15 1 0%;
+  position: relative;
+  min-width: 0;
+}
+
+.botao-sanduiche {
+  width: 100%;
+  height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  color: #1e3c72;
+}
+
+.botao-sanduiche:hover { background: #f0f4fa; }
+
+/* Menu do sanduíche ancorado no canto direito do botão */
+.menu-tabela {
+  top: 46px;
+  right: 0;
+}
+
+/* ---------- TABELA DE PRODUTOS ---------- */
+/* wrapper com rolagem horizontal: em telas estreitas, a tabela
+   rola para os lados em vez de quebrar o layout */
+.wrapper-tabela {
+  overflow-x: auto;
+}
+
+.tabela-produtos {
+  width: 100%;
+  border-collapse: collapse;   /* remove o espaço entre bordas */
+  font-size: 14px;
+}
+
+.tabela-produtos th {
+  background: #1e3c72;
+  color: #fff;
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* Linhas zebradas: linhas pares ganham fundo levemente cinza */
+.tabela-produtos tbody tr:nth-child(even) {
+  background: #f7f9fc;
+}
+
+.tabela-produtos td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e9eef5;
+  vertical-align: middle;
+}
+
+/* Código em fonte monoespaçada (padrão NN.NNN-XX alinha melhor) */
+.celula-codigo {
+  font-family: "Courier New", monospace;
+  font-weight: 700;
+  color: #1e3c72;
+  white-space: nowrap;
+}
+
+/* Miniatura da foto na tabela */
+.foto-produto {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;      /* preenche o quadrado sem distorcer */
+  border-radius: 8px;
+  display: block;
+}
+
+/* Símbolo quando o produto não tem foto */
+.foto-vazia {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: #eef2f8;
+  font-size: 18px;
+}
+
+/* Botão de três pontinhos (menu de opções do produto) */
+.botao-tres-pontos {
+  background: none;
+  border: none;
+  font-size: 20px;
+  font-weight: 700;
+  color: #666;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  line-height: 1;
+}
+
+.botao-tres-pontos:hover {
+  background: #eef2f8;
+  color: #1e3c72;
+}
+
+/* ---------- ETIQUETA DE CATEGORIA NA TABELA ---------- */
+/* Fundo colorido pastel (cor vem do JS via style inline) */
+.etiqueta-categoria {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  white-space: nowrap;
+}
+
+/* ---------- FOTO: PRÉ-VISUALIZAÇÃO NO CADASTRO/EDIÇÃO ---------- */
+.preview-foto {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #e3e8f0;
+  margin-bottom: 12px;
+  display: block;
+}
+
+/* ---------- HISTÓRICO DE MOVIMENTAÇÕES ---------- */
+.cartao-movimento {
+  background: #fafbfd;
+  border: 1px solid #e3e8f0;
+  border-left: 5px solid #ccc;   /* cor muda conforme o tipo */
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+/* Borda esquerda verde = entrada no estoque */
+.movimento-entrada { border-left-color: #1e7e34; }
+
+/* Borda esquerda âmbar = saída do estoque */
+.movimento-saida { border-left-color: #c77c02; }
+
+/* Borda azul = evento de edição */
+.movimento-edicao { border-left-color: #2a5298; }
+
+/* Borda vermelha = exclusão */
+.movimento-exclusao { border-left-color: #b3261e; }
+
+/* ---------- MENU DE OPÇÕES (três pontinhos) ---------- */
+/* position:fixed + coordenadas calculadas via JS: o menu
+   "gruda" na posição exata do botão clicado, mesmo rolando
+   a página. z-index alto garante que fique sobre a tabela. */
+.menu-opcoes {
+  position: fixed;
+  background: #fff;
+  border: 1px solid #e3e8f0;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  padding: 6px;
+  min-width: 200px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item-opcao {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+}
+
+.item-opcao:hover { background: #f0f4fa; }
+
+/* Opção destrutiva (Excluir) em vermelho */
+.opcao-perigosa { color: #b3261e; }
+.opcao-perigosa:hover { background: #fdecea; }
+
+/* ---------- MODAL GENÉRICO ---------- */
+/* Overlay escuro cobrindo a tela inteira; flex centraliza a
+   caixa branca. O JS alterna display:none/flex. */
+.modal-overlay {
+  position: fixed;
+  inset: 0;                    /* cobre a tela toda */
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 400;
+  padding: 16px;
+}
+
+/* Caixa branca do modal, com rolagem própria quando o
+   conteúdo é maior que a tela (max-height + overflow) */
+.modal-conteudo {
+  background: #fff;
+  border-radius: 14px;
+  padding: 24px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.3);
+}
+
+/* Conteúdo interno padrão dos modais */
+.modal-interno h3 {
+  margin: 0 0 14px;
+  color: #1e3c72;
+  font-size: 17px;
+}
+
+.modal-interno label {
+  display: block;
+  margin: 12px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #444;
+}
+
+.modal-interno input,
+.modal-interno select {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+/* Bloco de informações somente leitura (fundo cinza) */
+.bloco-somente-leitura {
+  background: #f4f6fa;
+  border: 1px solid #e3e8f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+.bloco-somente-leitura p { margin: 4px 0; }
+
+/* Botões dentro do modal */
+.botao-modal {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  background: #1e3c72;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 14px;
+}
+
+.botao-modal:hover { background: #16305a; }
+
+/* Botão secundário (Cancelar/Sair/Fechar): contorno, sem preenchimento */
+.botao-modal-secundario {
+  background: none;
+  border: 1px solid #ccc;
+  color: #444;
+}
+
+.botao-modal-secundario:hover { background: #f0f4fa; }
+
+/* Linha que alinha Sair (esquerda) e Salvar (direita) */
+.linha-botoes-modal {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.linha-botoes-modal .botao-modal { margin-top: 0; }
+
+/* Foto grande no modal de detalhes */
+.foto-detalhes {
+  width: 100%;
+  max-width: 240px;
+  border-radius: 10px;
+  display: block;
+  margin-bottom: 12px;
+}
+
+/* Lista de últimos movimentos nos detalhes */
+.lista-detalhes {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.lista-detalhes li { margin-bottom: 4px; }
+
+/* ---------- GERENCIADOR DE CATEGORIAS ---------- */
+.cartao-categoria {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fafbfd;
+  border: 1px solid #e3e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+/* Bloquinho da cor de identificação */
+.bloco-cor {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+.info-categoria {
+  flex: 1;
+  font-size: 14px;
+}
+
+/* ---------- PALETA DE CORES (edição de categoria) ---------- */
+.paleta-cores {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);  /* 2 linhas de 6 cores */
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.cor-opcao {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* Borda azul no quadradinho selecionado */
+.cor-opcao.selecionada {
+  border-color: #1e3c72;
+  box-shadow: 0 0 0 2px rgba(30,60,114,0.25);
+}
+
+/* ---------- RESPONSIVIDADE ---------- */
+/* Em telas estreitas, o menu lateral vira uma faixa horizontal
+   no topo do conteúdo, com as opções lado a lado */
+@media (max-width: 800px) {
+  .layout-estoque {
+    flex-direction: column;
+  }
+  .menu-lateral {
+    flex: none;
+    width: auto;
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .item-menu { width: auto; }
+}
+
+/* ---------- BARRA DE FILTROS DO HISTÓRICO ---------- */
+/* Mesma mecânica da barra da tabela: flex com gap, busca
+   flexível e seletor com largura própria. */
+.controles-historico {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin-bottom: 14px;
+}
+
+.campo-busca-historico {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.seletor-filtro-historico {
+  flex: 0 0 160px;
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+  background: #fff;
+}

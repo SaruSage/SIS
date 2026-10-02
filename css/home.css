@@ -1,0 +1,324 @@
+/* ============================================================
+   PROJETO GOLDEN — Estilos EXCLUSIVOS da homepage (portal)
+   ============================================================
+   POR QUE ESTE ARQUIVO EXISTE:
+   O style.css foi feito para a tela de login, e ele aplica
+   estilos ao <body> inteiro (centralização, altura da tela)
+   para deixar a caixinha de login no meio da página.
+   A homepage herda esses estilos e por isso o layout quebra:
+   cards espremidos no centro, sidebar deslocada etc.
+
+   A SOLUÇÃO:
+   1. Este arquivo é carregado DEPOIS do style.css na home.html.
+   2. Quando dois arquivos definem a mesma propriedade, o
+      navegador usa a do ÚLTIMO arquivo (regra da "cascata").
+   3. Então aqui "zeramos" o body e redefinimos tudo o que a
+      homepage precisa, sem tocar no login/cadastro/admin.
+   ============================================================ */
+
+/* ---------- RESET: desfaz o estilo de login no body ---------- */
+body {
+  display: block;            /* cancela o flex/centralização do login */
+  justify-content: initial;  /* idem */
+  align-items: initial;      /* idem */
+  min-height: initial;       /* a home cresce com o conteúdo, não trava */
+  margin: 0;                 /* margem padrão do navegador zerada */
+  background: #f4f6fa;       /* fundo claro do portal */
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Esconde o conteúdo até a verificação de login passar */
+.oculto {
+  display: none;
+}
+
+/* ---------- TOPBAR (barra superior fixa) ---------- */
+.topbar {
+  position: fixed;    /* prega a barra no topo, mesmo rolando a página */
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: #1e3c72;
+  color: #fff;
+  display: flex;      /* organiza os filhos em linha */
+  align-items: center;/* centraliza os filhos na VERTICAL da barra */
+  gap: 16px;
+  padding: 0 20px;
+  z-index: 100;       /* fica acima de todo o resto da página */
+}
+
+/* Campo de busca CENTRALIZADO na barra.
+   Como o campo agora é "position:absolute", ele sai do fluxo
+   normal do flex e passa a ser posicionado em relação à .topbar
+   (que é o pai com position:fixed — a referência mais próxima).
+   - left:50% + translateX(-50%) → centraliza na HORIZONTAL:
+     o 50% posiciona a borda ESQUERDA no meio da barra, e o
+     translateX(-50%) puxa o campo de volta metade da própria
+     largura, deixando o centro do campo exatamente no centro.
+   - top:50% + translateY(-50%) → mesma lógica na VERTICAL.
+   - width:min(420px, 60%) → no máximo 420px, mas em telas
+     estreitas encolhe para 60% da barra para não colidir com
+     o sino e o perfil à direita. */
+.campo-busca {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, 60%);
+  padding: 9px 14px;
+  border: none;
+  border-radius: 20px;
+  font-size: 14px;
+  outline: none;
+}
+
+/* Grupo de ações (sino + perfil): margin-left:auto empurra
+   o grupo inteiro para a extrema direita da barra */
+.acoes-usuario {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  position: relative; /* referência para as caixas flutuantes */
+}
+
+/* Botão redondo do sino de notificações.
+   GARANTIA DE CÍRCULO PERFEITO (a "bola" nunca deforma):
+   - flex: 0 0 40px → dentro do flex da topbar, o primeiro
+     número (flex-grow: 0) proíbe o botão de ESTICAR para
+     preencher espaço; o segundo (flex-shrink: 0) proíbe ele
+     de ENCOLHER quando falta espaço. A largura fica travada
+     em 40px sempre.
+   - width + height iguais (40px) → base quadrada.
+   - aspect-ratio: 1 / 1 → cinto de segurança: mesmo que algo
+     tente alterar uma das dimensões, o navegador força a
+     proporção 1:1 (quadrado), e quadrado + border-radius 50%
+     = círculo perfeito.
+   - box-sizing: border-box → qualquer borda/padding futuro
+     passa a contar DENTRO dos 40px, não somando por fora.
+   - display:flex + align/justify center + line-height:1 →
+     mantêm o emoji cravado no centro exato do círculo. */
+.botao-icone {
+  position: relative;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  background: rgba(255,255,255,0.12);
+  border: none;
+  border-radius: 50%;
+  font-size: 17px;
+  cursor: pointer;
+  color: #fff;
+}
+
+.botao-icone:hover { background: rgba(255,255,255,0.25); }
+
+.botao-icone:hover { background: rgba(255,255,255,0.25); }
+
+/* Bolinha vermelha de "há notificações não lidas" */
+.selo {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff5252;
+  display: none;      /* o JS mostra quando há novidades */
+}
+
+.selo.visivel { display: block; }
+
+/* Botão do perfil: avatar + nome + seta, lado a lado */
+.botao-perfil {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.12);
+  border: none;
+  border-radius: 20px;
+  padding: 5px 12px 5px 5px;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.botao-perfil:hover { background: rgba(255,255,255,0.25); }
+
+/* Círculo branco com a inicial do usuário */
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #fff;
+  color: #1e3c72;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.seta { font-size: 11px; }
+
+/* ---------- CAIXAS FLUTUANTES ---------- */
+/* position:absolute faz a caixa "flutuar" sobre a página,
+   ancorada no pai (.acoes-usuario, que é position:relative) */
+.caixa-flutuante {
+  position: absolute;
+  top: 52px;
+  right: 20px;
+  width: 280px;
+  background: #fff;
+  color: #333;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  padding: 14px;
+  display: none;      /* escondida por padrão */
+  z-index: 200;
+}
+
+/* A classe .aberta (controlada pelo JS) revela a caixa */
+.caixa-flutuante.aberta { display: block; }
+
+.caixa-flutuante h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: #1e3c72;
+}
+
+.caixa-flutuante ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.caixa-flutuante li {
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+  font-size: 13px;
+}
+
+.caixa-flutuante li:last-child { border-bottom: none; }
+
+/* ---------- LAYOUT PRINCIPAL: conteúdo + sidebar ---------- */
+/* display:flex divide a tela em duas colunas:
+   a área de apps (flex:1) e o centro de controle (largura fixa).
+   O padding-top de 60px evita que a topbar fixa cubra o conteúdo. */
+.layout-principal {
+  display: flex;
+  padding-top: 60px;
+  min-height: 100vh;
+  background: #f4f6fa;
+}
+
+/* ---------- ÁREA DE APLICAÇÕES (coluna esquerda) ---------- */
+.area-apps {
+  flex: 1;            /* come todo o espaço que a sidebar não usar */
+  padding: 28px;
+}
+
+.area-apps h2 {
+  color: #1e3c72;
+  margin-top: 0;
+}
+
+/* Grade responsiva: colunas de no mínimo 200px. O navegador
+   cria quantas colunas couberem na largura disponível — em
+   telas largas 4 cards por linha, em celulares 1 ou 2. */
+.grade-apps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.card-app {
+  background: #fff;
+  border: 1px solid #e3e8f0;
+  border-radius: 12px;
+  padding: 20px 16px;
+  text-decoration: none;
+  color: #333;
+  display: flex;
+  flex-direction: column;  /* ícone, título e descrição empilhados */
+  gap: 6px;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.card-app:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(30,60,114,0.15);
+}
+
+.icone-app { font-size: 28px; }
+
+.titulo-app {
+  font-weight: 700;
+  color: #1e3c72;
+  font-size: 15px;
+}
+
+.desc-app { font-size: 12px; color: #777; }
+
+/* ---------- CENTRO DE CONTROLE (coluna direita) ---------- */
+/* Largura FIXA de 260px: é o flex:0 0 260px que garante que a
+   sidebar nunca seja espremida nem esticada pela coluna vizinha. */
+.centro-controle {
+  flex: 0 0 260px;
+  background: #fff;
+  border-left: 1px solid #e3e8f0;
+  padding: 24px 18px;
+}
+
+.centro-controle h3 {
+  margin: 0 0 16px;
+  font-size: 15px;
+  color: #1e3c72;
+}
+
+/* Cada linha: rótulo à esquerda, valor à direita */
+.item-controle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+  font-size: 13px;
+}
+
+.valor-controle {
+  font-weight: 700;
+  color: #1e3c72;
+  font-size: 16px;
+}
+
+.atalho-admin {
+  display: block;
+  margin-top: 18px;
+  font-size: 13px;
+  color: #2a5298;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.atalho-admin:hover { text-decoration: underline; }
+
+/* ---------- RESPONSIVIDADE ---------- */
+/* Em telas estreitas (celular/tablet), a coluna lateral desce
+   para baixo do conteúdo em vez de ficar ao lado. */
+@media (max-width: 800px) {
+  .layout-principal { flex-direction: column; }
+  .centro-controle {
+    flex: none;              /* solta a largura fixa no celular */
+    width: auto;
+    border-left: none;
+    border-top: 1px solid #e3e8f0;
+  }
+}

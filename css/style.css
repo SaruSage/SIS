@@ -1,0 +1,621 @@
+/* ============================================================
+   PROJETO GOLDEN — Estilos da página de login
+   ============================================================
+   CSS é a "aparência" da página: cores, tamanhos, posições.
+   Cada bloco abaixo ataca um elemento do index.html pelo seu
+   seletor (tag, .classe ou #id).
+   ============================================================ */
+
+/* Reset básico: remove margens/paddings padrão do navegador
+   para termos controle total do espaçamento. */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Estilo geral da página inteira (o <body>) */
+body {
+  /* Fonte usada em todo o site (fallbacks caso a primeira falhe) */
+  font-family: "Segoe UI", Arial, sans-serif;
+
+  /* Fundo em degradê suave de azul escuro */
+  background: linear-gradient(135deg, #1e3c72, #2a5298);
+
+  /* Centraliza o container na tela (horizontal + vertical) */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  /* Ocupa 100% da altura da janela do navegador */
+  min-height: 100vh;
+}
+
+/* A caixa branca central que contém o formulário */
+.container {
+  background: #ffffff;            /* fundo branco */
+  padding: 40px;                  /* espaço interno */
+  border-radius: 12px;            /* cantos arredondados */
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); /* sombra suave */
+  width: 100%;
+  max-width: 380px;               /* largura máxima em telas grandes */
+}
+
+/* Título "Projeto Golden" */
+h1 {
+  text-align: center;             /* centralizado */
+  color: #1e3c72;                 /* azul escuro */
+  margin-bottom: 8px;             /* espaço abaixo */
+  font-size: 26px;
+}
+
+/* Subtítulo abaixo do título */
+.subtitulo {
+  text-align: center;
+  color: #777;
+  margin-bottom: 24px;
+  font-size: 14px;
+}
+
+/* Rótulos dos campos (E-mail / Senha) */
+label {
+  display: block;                 /* ocupa a linha inteira */
+  margin-bottom: 6px;
+  font-weight: 600;               /* texto em negrito */
+  color: #333;
+  font-size: 14px;
+}
+
+/* Campos de digitação (input) */
+input {
+  width: 100%;                    /* ocupa toda a largura da caixa */
+  padding: 12px;
+  margin-bottom: 16px;            /* espaço antes do próximo campo */
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 15px;
+  outline: none;                  /* remove o contorno padrão feio */
+  transition: border-color 0.2s;  /* animação suave da borda */
+}
+
+/* Quando o usuário clica no campo, a borda fica azul */
+input:focus {
+  border-color: #2a5298;
+}
+
+/* Botão "Entrar" */
+button {
+  width: 100%;
+  padding: 12px;
+  background: #2a5298;            /* azul da identidade visual */
+  color: #fff;                    /* texto branco */
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;                /* mãozinha ao passar o mouse */
+  transition: background 0.2s;
+}
+
+/* Botão escurece levemente quando o mouse passa por cima */
+button:hover {
+  background: #1e3c72;
+}
+
+/* Botão desabilitado (durante o processo de login) */
+button:disabled {
+  background: #9db3d6;            /* cor "apagada" indica aguarde */
+  cursor: not-allowed;
+}
+
+/* Área de mensagens de erro/sucesso (começa invisível) */
+.mensagem {
+  display: none;                  /* escondida por padrão */
+  margin-top: 16px;
+  padding: 10px;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 14px;
+}
+
+/* Quando o JS adiciona a classe "erro", fica vermelho */
+.mensagem.erro {
+  display: block;
+  background: #fdecea;            /* fundo vermelho claro */
+  color: #b3261e;                 /* texto vermelho escuro */
+}
+
+/* Quando o JS adiciona a classe "sucesso", fica verde */
+.mensagem.sucesso {
+  display: block;
+  background: #e6f4ea;
+  color: #1e7e34;
+}
+
+/* Texto do rodapé ("Não tem conta? Criar conta") */
+.rodape {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 14px;
+  color: #555;
+}
+
+.rodape a {
+  color: #2a5298;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.rodape a:hover {
+  text-decoration: underline;
+}
+
+/* ============================================================
+   PROJETO GOLDEN — Estilos do cadastro e do painel admin
+   (adicione este bloco ao FINAL do style.css existente)
+   ============================================================ */
+
+/* Controle das etapas do cadastro: por padrão, toda "etapa"
+   está escondida; só a que ganhar "etapa-visivel" aparece. */
+.etapa {
+  display: none;
+}
+
+.etapa-visivel {
+  display: block;
+}
+
+/* Container mais largo para o painel admin (lista precisa
+   de mais espaço que o formulário de login). */
+.container-largo {
+  max-width: 560px;
+}
+
+/* Seções internas do painel admin */
+.secao-admin {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+}
+
+.secao-admin h2 {
+  font-size: 18px;
+  color: #1e3c72;
+  margin-bottom: 8px;
+}
+
+/* Textos de apoio/explicação dentro do painel */
+.texto-ajuda {
+  font-size: 13px;
+  color: #777;
+  margin-bottom: 12px;
+}
+
+/* Código de adesão gerado, em destaque para copiar fácil */
+.codigo-destaque {
+  margin-top: 12px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 3px;   /* espaça as letras: K7 M2 P9 X4 */
+  color: #1e3c72;
+  text-align: center;
+}
+
+/* Cartão de cada solicitação pendente */
+.cartao-solicitacao {
+  background: #f7f9fc;
+  border: 1px solid #e3e8f0;
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #333;
+}
+
+/* Botões de decisão do administrador */
+.botao-aprovar,
+.botao-rejeitar {
+  width: auto;              /* sobrescreve o width:100% do botão padrão */
+  padding: 8px 16px;
+  margin-right: 8px;
+  margin-top: 10px;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.botao-aprovar { background: #1e7e34; }
+.botao-aprovar:hover { background: #155d26; }
+
+.botao-rejeitar { background: #b3261e; }
+.botao-rejeitar:hover { background: #8c1d17; }
+
+/* Botão "Sair" com visual mais discreto */
+.botao-secundario {
+  margin-top: 24px;
+  background: #eef1f6;
+  color: #1e3c72;
+}
+
+.botao-secundario:hover {
+  background: #dde3ec;
+}
+/* ============================================================
+   PROJETO GOLDEN — Estilos das abas do painel admin
+   (adicione este bloco ao FINAL do style.css existente)
+   ============================================================ */
+
+/* Barra que segura os três botões de aba, lado a lado */
+.abas {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* Botão de aba inativa */
+.aba {
+  flex: 1;                       /* todas com a mesma largura */
+  padding: 10px;
+  background: #eef1f6;
+  color: #1e3c72;
+  border: none;
+  border-radius: 8px 8px 0 0;    /* cantos de cima arredondados */
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* Aba selecionada: destaca com o azul da identidade */
+.aba-ativa {
+  background: #2a5298;
+  color: #fff;
+}
+
+/* Painéis de conteúdo: escondidos por padrão */
+.painel-aba {
+  display: none;
+  padding-top: 16px;
+}
+
+/* Só o painel da aba ativa aparece */
+.painel-visivel {
+  display: block;
+}
+
+/* Etiqueta de status dentro dos cartões */
+.etiqueta-status {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.etiqueta-pendente  { background: #fff3cd; color: #8a6d00; }
+.etiqueta-aprovada  { background: #e6f4ea; color: #1e7e34; }
+.etiqueta-bloqueada { background: #ffe8cc; color: #a05a00; }
+.etiqueta-excluida  { background: #fdecea; color: #b3261e; }
+
+/* Botão Bloquear (âmbar, para diferenciar do vermelho de excluir) */
+.botao-bloquear {
+  width: auto;
+  padding: 8px 16px;
+  margin-right: 8px;
+  margin-top: 10px;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #c77c02;
+}
+
+.botao-bloquear:hover { background: #9c6102; }
+
+/* Botão Reativar (azul, indica ação positiva de retorno) */
+.botao-reativar {
+  width: auto;
+  padding: 8px 16px;
+  margin-right: 8px;
+  margin-top: 10px;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #2a5298;
+}
+
+.botao-reativar:hover { background: #1e3c72; }
+
+/* Botão de copiar código de adesão */
+.botao-copiar {
+  width: auto;
+  padding: 8px 16px;
+  margin-top: 10px;
+  border: none;
+  border-radius: 6px;
+  background: #2a5298;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.botao-copiar:hover {
+  background: #1e3c72;
+}
+/* ============================================================
+   PROJETO GOLDEN — Estilos da homepage (portal)
+   (adicione este bloco ao FINAL do style.css existente)
+   ============================================================ */
+
+/* Esconde o conteúdo até a verificação de login passar */
+.oculto {
+  display: none;
+}
+
+/* ---------- TOPBAR ---------- */
+.topbar {
+  position: fixed;          /* fica pregada no topo, mesmo rolando */
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: #1e3c72;
+  color: #fff;
+  display: flex;            /* organiza filhos em linha */
+  align-items: center;      /* centraliza verticalmente */
+  gap: 16px;
+  padding: 0 20px;
+  z-index: 100;             /* fica acima de todo o resto */
+}
+
+/* Campo de busca: ocupa o espaço que sobrar (flex:1) */
+.campo-busca {
+  flex: 1;
+  max-width: 420px;
+  padding: 9px 14px;
+  border: none;
+  border-radius: 20px;
+  font-size: 14px;
+  outline: none;
+}
+
+.acoes-usuario {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;        /* empurra o grupo para a direita */
+  position: relative;       /* referência para as caixas flutuantes */
+}
+
+/* Botão redondo do sino */
+.botao-icone {
+  position: relative;
+  background: rgba(255,255,255,0.12);
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  font-size: 17px;
+  cursor: pointer;
+  color: #fff;
+}
+
+.botao-icone:hover { background: rgba(255,255,255,0.25); }
+
+/* Bolinha vermelha de notificação não lida */
+.selo {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff5252;
+  display: none;            /* o JS mostra quando há novidades */
+}
+
+.selo.visivel { display: block; }
+
+/* Botão do perfil (avatar + nome + seta) */
+.botao-perfil {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.12);
+  border: none;
+  border-radius: 20px;
+  padding: 5px 12px 5px 5px;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.botao-perfil:hover { background: rgba(255,255,255,0.25); }
+
+/* Círculo com a inicial do usuário */
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #fff;
+  color: #1e3c72;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.seta { font-size: 11px; }
+
+/* ---------- CAIXAS FLUTUANTES (notificações e perfil) ---------- */
+.caixa-flutuante {
+  position: absolute;       /* "flutua" sobre a página */
+  top: 52px;                /* logo abaixo da topbar */
+  right: 20px;
+  width: 280px;
+  background: #fff;
+  color: #333;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  padding: 14px;
+  display: none;            /* escondida por padrão */
+  z-index: 200;
+}
+
+.caixa-flutuante.aberta { display: block; }
+
+.caixa-flutuante h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: #1e3c72;
+}
+
+.caixa-flutuante ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.caixa-flutuante li {
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+  font-size: 13px;
+}
+
+.caixa-flutuante li:last-child { border-bottom: none; }
+
+/* ---------- LAYOUT PRINCIPAL (conteúdo + sidebar) ---------- */
+.layout-principal {
+  display: flex;
+  /* 60px = altura da topbar fixa; dá o respiro do conteúdo */
+  padding-top: 60px;
+  min-height: 100vh;
+  background: #f4f6fa;
+}
+
+/* ---------- ÁREA DE APLICAÇÕES ---------- */
+.area-apps {
+  flex: 1;                  /* ocupa todo o espaço restante */
+  padding: 28px;
+}
+
+.area-apps h2 {
+  color: #1e3c72;
+  margin-top: 0;
+}
+
+/* Grade responsiva: colunas de no mínimo 200px que se
+   ajustam sozinhas conforme a largura da tela */
+.grade-apps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.card-app {
+  background: #fff;
+  border: 1px solid #e3e8f0;
+  border-radius: 12px;
+  padding: 20px 16px;
+  text-decoration: none;
+  color: #333;
+  display: flex;
+  flex-direction: column;   /* ícone, título e descrição empilhados */
+  gap: 6px;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.card-app:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(30,60,114,0.15);
+}
+
+.icone-app { font-size: 28px; }
+
+.titulo-app {
+  font-weight: 700;
+  color: #1e3c72;
+  font-size: 15px;
+}
+
+.desc-app { font-size: 12px; color: #777; }
+
+/* ---------- CENTRO DE CONTROLE (sidebar) ---------- */
+.centro-controle {
+  width: 260px;
+  background: #fff;
+  border-left: 1px solid #e3e8f0;
+  padding: 24px 18px;
+}
+
+.centro-controle h3 {
+  margin: 0 0 16px;
+  font-size: 15px;
+  color: #1e3c72;
+}
+
+.item-controle {
+  display: flex;
+  justify-content: space-between;  /* rótulo à esquerda, valor à direita */
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+  font-size: 13px;
+}
+
+.valor-controle {
+  font-weight: 700;
+  color: #1e3c72;
+  font-size: 16px;
+}
+
+.atalho-admin {
+  display: block;
+  margin-top: 18px;
+  font-size: 13px;
+  color: #2a5298;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.atalho-admin:hover { text-decoration: underline; }
+
+/* ---------- RESPONSIVIDADE (celular/tablet) ---------- */
+/* Em telas estreitas, a sidebar desce para baixo do conteúdo */
+@media (max-width: 800px) {
+  .layout-principal { flex-direction: column; }
+  .centro-controle {
+    width: auto;
+    border-left: none;
+    border-top: 1px solid #e3e8f0;
+  }
+  .nome-visivel { display: none; }  /* no celular, só o avatar aparece */
+}
+
+/* Estilo do seletor de cargo (cadastro e painel admin) */
+select {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+/* Seletor dentro dos cartões do painel admin (largura natural) */
+.seletor-cargo {
+  width: auto;
+  margin: 10px 8px 0 0;
+  display: inline-block;
+}

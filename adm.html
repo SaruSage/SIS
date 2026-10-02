@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<!--
+  ============================================================
+  PROJETO GOLDEN — Painel do Administrador
+  ============================================================
+  O painel tem TRÊS ABAS:
+  1. Pendentes  → solicitações aguardando decisão (aprovar/rejeitar)
+  2. Aprovados  → contas liberadas (bloquear / excluir / reativar)
+  3. Rejeitados → histórico somente leitura de quem tentou cadastrar
+  Acima das abas fica a seção de geração de códigos de adesão,
+  agora com botão de COPIAR o código com um clique.
+  ============================================================
+-->
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Administração — Projeto Golden</title>
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- Biblioteca do EmailJS (envio de e-mails pelo navegador) -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+</head>
+<body>
+
+  <div class="container container-largo">
+
+    <h1>Painel do Administrador</h1>
+    <p class="subtitulo" id="boas-vindas">Carregando...</p>
+
+    <!-- Mensagem exibida se um NÃO-administrador abrir a página -->
+    <p id="acesso-negado" class="mensagem erro" style="display:none;">
+      Esta área é restrita a administradores.
+    </p>
+
+    <!-- Conteúdo visível apenas para administradores -->
+    <div id="conteudo-admin" style="display:none;">
+
+      <!-- Seção de geração de códigos (sempre visível, acima das abas) -->
+      <section class="secao-admin">
+        <h2>Códigos de adesão</h2>
+        <p class="texto-ajuda">
+          Gere um código e envie-o à pessoa autorizada a se cadastrar.
+          Cada código funciona uma única vez.
+        </p>
+        <button type="button" id="botao-gerar-codigo">Gerar código</button>
+
+        <!--
+          Bloco do código gerado. Começa escondido e só aparece
+          quando um código é criado. O botão ao lado copia o
+          código com um clique.
+        -->
+        <div id="bloco-codigo-gerado" style="display:none;">
+          <p id="codigo-gerado" class="codigo-destaque"></p>
+          <button type="button" id="botao-copiar-codigo" class="botao-copiar">
+            Copiar código
+          </button>
+        </div>
+      </section>
+
+      <!--
+        BARRA DE ABAS
+        Cada botão tem um atributo "data-aba" com o nome do painel
+        que ele controla. O JS lê esse atributo com botao.dataset.aba.
+      -->
+      <div class="abas">
+        <button type="button" class="aba aba-ativa" data-aba="pendentes">Pendentes</button>
+        <button type="button" class="aba" data-aba="aprovados">Aprovados</button>
+        <button type="button" class="aba" data-aba="rejeitados">Rejeitados</button>
+      </div>
+
+      <!-- PAINEL 1: pendentes (visível por padrão) -->
+      <div id="painel-pendentes" class="painel-aba painel-visivel">
+        <div id="lista-pendentes">
+          <p class="texto-ajuda">Nenhuma solicitação pendente no momento.</p>
+        </div>
+      </div>
+
+      <!-- PAINEL 2: aprovados (começa escondido) -->
+      <div id="painel-aprovados" class="painel-aba">
+        <div id="lista-aprovados">
+          <p class="texto-ajuda">Nenhum usuário aprovado ainda.</p>
+        </div>
+      </div>
+
+      <!-- PAINEL 3: rejeitados (histórico, sem botões de ação) -->
+      <div id="painel-rejeitados" class="painel-aba">
+        <div id="lista-rejeitados">
+          <p class="texto-ajuda">Nenhuma solicitação rejeitada ainda.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <!--
+      Botão Sair FORA do bloco admin: visível mesmo com acesso negado.
+    -->
+    <button type="button" id="botao-sair" class="botao-secundario">Sair</button>
+
+    <p id="mensagem" class="mensagem"></p>
+
+  </div>
+
+  <script type="module" src="js/adm.js"></script>
+
+</body>
+</html>

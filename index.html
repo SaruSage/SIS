@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<!--
+  ============================================================
+  PROJETO GOLDEN — Página de Login
+  ============================================================
+  Este é o "esqueleto" visual da página. Ele não contém lógica:
+  apenas estrutura (HTML) e ligações para o estilo (CSS) e
+  para o código que faz o login funcionar (JS).
+
+  ORDEM DE CARREGAMENTO IMPORTA:
+  1. O CSS é carregado no <head> para a página já nascer estilizada.
+  2. O JS é carregado no fim do <body> com type="module" — isso
+     garante que o HTML já exista na tela quando o código rodar,
+     e permite usar "import" (módulos modernos do JavaScript).
+  ============================================================
+-->
+<html lang="pt-BR">
+<head>
+  <!-- Define a codificação de caracteres (permite acentos: ç, ã, é...) -->
+  <meta charset="UTF-8">
+
+  <!-- Deixa a página responsiva: adapta o tamanho em celular e tablet -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Título que aparece na aba do navegador -->
+  <title>Login — Projeto Golden</title>
+
+  <!-- Ligação com o arquivo de estilos (fica na pasta css/) -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!--
+    "container" é a caixa central que abriga o formulário.
+    Tudo dentro dela forma a interface de login.
+  -->
+  <div class="container">
+
+    <!-- Cabeçalho da página -->
+    <h1>Projeto Golden</h1>
+    <p class="subtitulo">Acesse sua conta para continuar</p>
+
+    <!--
+      FORMULÁRIO DE LOGIN
+      - id="form-login": o JavaScript usa esse id para "escutar"
+        quando o usuário clica em Entrar.
+      - onsubmit="return false": impede que a página recarregue
+        do jeito antigo; quem controla o envio é o nosso JS.
+    -->
+    <form id="form-login">
+
+      <!-- Campo de e-mail -->
+      <label for="email">E-mail</label>
+      <input
+        type="email"
+        id="email"
+        placeholder="seu@email.com"
+        required
+      />
+      <!-- required: o navegador só envia se o campo estiver preenchido -->
+
+      <!-- Campo de senha -->
+      <label for="senha">Senha</label>
+      <input
+        type="password"
+        id="senha"
+        placeholder="Sua senha"
+        required
+      />
+      <!-- type="password": esconde os caracteres com bolinhas -->
+
+      <!-- Botão que dispara o login (o JS escuta o clique) -->
+      <button type="submit" id="botao-entrar">Entrar</button>
+
+      <!--
+        Área de mensagens de erro/sucesso.
+        Começa vazia e invisível; o JavaScript preenche e mostra
+        quando algo acontece (ex.: "Senha incorreta").
+      -->
+      <p id="mensagem" class="mensagem"></p>
+
+    </form>
+
+    <!-- Link para a tela de cadastro (será construída em outro passo) -->
+    <p class="rodape">
+      Não tem conta?
+      <a href="cadastro.html">Criar conta</a>
+    </p>
+
+  </div>
+
+  <!--
+    Script principal. type="module" habilita "import/export",
+    que é como o login.js "puxa" a conexão do firebase-config.js.
+  -->
+  <script type="module" src="js/login.js"></script>
+
+</body>
+</html>
