@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<!--
+  ============================================================
+  PROJETO GOLDEN — Módulo de Vendas (Kanban)
+  ============================================================
+  Estrutura:
+  1. CABEÇALHO → saudação, botão voltar, perfil
+  2. BARRA DE CONTROLES → busca + menu sanduíche
+  3. KANBAN → colunas com scroll horizontal
+  4. MODAL GENÉRICO → reaproveitado do padrão do estoque
+  A página é PROTEGIDA: o vendas.js só revela o conteúdo
+  depois de confirmar cargo "vendas" ou "administracao".
+  ============================================================
+-->
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vendas — Projeto Golden</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/vendas.css">
+</head>
+<body>
+
+  <div id="conteudo-protegido" class="oculto">
+
+    <!-- ============ CABEÇALHO ============ -->
+    <header class="cabecalho-modulo">
+      <span class="saudacao-header">
+        Logado como <strong id="nome-usuario">...</strong>
+      </span>
+      <div class="acoes-cabecalho">
+        <button type="button" id="botao-voltar" class="botao-icone-header" title="Voltar">
+          ←
+        </button>
+        <div class="perfil-wrapper">
+          <button type="button" id="botao-perfil" class="botao-icone-header" title="Perfil">
+            <span id="avatar" class="avatar-header">?</span>
+          </button>
+          <div id="menu-perfil" class="menu-flutuante">
+            <button type="button" id="item-sair" class="item-menu-perfil item-sair">
+              🚪 Sair
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <p id="acesso-negado" class="mensagem erro" style="display:none;">
+      Esta área é restrita aos setores de Vendas e Administração.
+    </p>
+
+    <div id="conteudo-vendas" style="display:none;">
+
+      <!-- ============ BARRA DE CONTROLES ============ -->
+      <div class="barra-kanban">
+        <input
+          type="text"
+          id="busca-card"
+          class="campo-busca-kanban"
+          placeholder="Buscar por nome, telefone ou e-mail..."
+          autocomplete="off"
+        />
+
+        <button type="button" id="botao-nova-coluna" class="botao-nova-coluna">
+          ➕ Nova coluna
+        </button>
+
+        <div class="sanduiche-wrapper">
+          <button type="button" id="botao-menu-kanban" class="botao-sanduiche" title="Opções">
+            ☰
+          </button>
+          <div id="menu-kanban" class="menu-flutuante menu-kanban">
+            <button type="button" id="item-excluidos" class="item-menu-perfil">
+              🗑️ Ver excluídos
+            </button>
+            <button type="button" id="item-historico-global" class="item-menu-perfil">
+              📜 Histórico geral
+            </button>
+            <button type="button" id="item-configuracoes" class="item-menu-perfil">
+              ⚙️ Configurações
+            </button>
+            <button type="button" id="item-card-teste" class="item-menu-perfil" style="display:none;">
+              🎲 Gerar card de teste
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ KANBAN ============ -->
+      <div id="kanban" class="kanban">
+        <p class="texto-ajuda">Carregando colunas...</p>
+      </div>
+
+    </div>
+
+    <p id="mensagem" class="mensagem"></p>
+
+  </div>
+
+  <!-- ============ MODAL GENÉRICO ============ -->
+  <div id="modal-overlay" class="modal-overlay" style="display:none;">
+    <div id="modal-conteudo" class="modal-conteudo"></div>
+  </div>
+
+  <script type="module" src="js/vendas.js"></script>
+
+</body>
+</html>
