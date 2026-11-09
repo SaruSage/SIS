@@ -208,17 +208,17 @@ async function carregarDadosDoUsuario() {
 // e-mail dono do sistema, como rede de segurança).
 // ------------------------------------------------------------
 function aplicarPermissoes() {
-  const ehAdminEmail = ADMINISTRADORES.includes((auth.currentUser.email || "").toLowerCase());
-  const permitidos = ACESSO_POR_CARGO[cargoAtual] || [];
-
+  const emailAtual = (auth.currentUser?.email || "").toLowerCase();
+  const ehAdminEmail = ADMINISTRADORES.includes(emailAtual);
+  const ehAdmin = cargoAtual === "administracao" || ehAdminEmail;
+  const permitidos = ehAdmin
+    ? Object.values(ACESSO_POR_CARGO).flat()
+    : (ACESSO_POR_CARGO[cargoAtual] || []);
   gradeApps.querySelectorAll(".card-app").forEach((card) => {
     const podeVer = permitidos.includes(card.dataset.nome);
     card.style.display = podeVer ? "flex" : "none";
   });
-
-  if (cargoAtual === "administracao" || ehAdminEmail) {
-    atalhoAdmin.style.display = "block";
-  }
+  atalhoAdmin.style.display = ehAdmin ? "block" : "none";
 }
 
 // ------------------------------------------------------------
@@ -231,7 +231,9 @@ function aplicarPermissoes() {
 // ------------------------------------------------------------
 campoBusca.addEventListener("input", () => {
   const termo = campoBusca.value.trim().toLowerCase();
-  const permitidos = ACESSO_POR_CARGO[cargoAtual] || [];
+  const ehAdminEmail = ADMINISTRADORES.includes((auth.currentUser?.email || "").toLowerCase());
+  const ehAdmin = cargoAtual === "administracao" || ehAdminEmail;
+  const permitidos = ehAdmin ? Object.values(ACESSO_POR_CARGO).flat() : (ACESSO_POR_CARGO[cargoAtual] || []);
   let visiveis = 0;
 
   // querySelectorAll pega todos os cards de uma vez.
