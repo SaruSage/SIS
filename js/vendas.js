@@ -56,7 +56,6 @@ const nomeUsuario = document.getElementById("nome-usuario");
 const avatar = document.getElementById("avatar");
 const acessoNegado = document.getElementById("acesso-negado");
 const conteudoVendas = document.getElementById("conteudo-vendas");
-const botaoVoltar = document.getElementById("botao-voltar");
 const botaoPerfil = document.getElementById("botao-perfil");
 const menuPerfil = document.getElementById("menu-perfil");
 const itemSair = document.getElementById("item-sair");
@@ -106,10 +105,36 @@ function segundosDe(timestamp) {
   return (timestamp && timestamp.seconds) || 0;
 }
 
-function abrirModal(conteudo) {
+function abrirModal(caixa) {
   modalConteudo.innerHTML = "";
-  modalConteudo.appendChild(conteudo);
+  const scrollWrapper = document.createElement("div");
+  scrollWrapper.className = "modal-scroll";
+  scrollWrapper.appendChild(caixa);
+  modalConteudo.appendChild(scrollWrapper);
+
+  const scrollEl = modalConteudo.querySelector(".modal-scroll");
+  if (scrollEl) {
+    const barraAntiga = modalConteudo.querySelector(".barra-custom-wrapper");
+    if (barraAntiga) barraAntiga.remove();
+    montarBarraCustomizada(scrollEl);
+  }
+
   modalOverlay.style.display = "flex";
+
+  requestAnimationFrame(() => {
+    const scrollEl = modalConteudo.querySelector(".modal-scroll");
+    if (scrollEl) {
+      const barra = modalConteudo.querySelector(".barra-custom-wrapper");
+      if (barra) {
+        const alturaVisivel = scrollEl.clientHeight;
+        const alturaTotal = scrollEl.scrollHeight;
+        if (alturaTotal > alturaVisivel + 4) {
+          barra.classList.add("visivel");
+        }
+      }
+    }
+  });
+  scrollWrapper.scrollTop = 0;
 }
 
 function fecharModal() {
@@ -162,7 +187,7 @@ onAuthStateChanged(auth, async (usuario) => {
   const primeiroNome = nomeCompleto.split(" ")[0];
   nomeUsuario.textContent = primeiroNome;
   avatar.textContent = primeiroNome.charAt(0).toUpperCase();
-  conteudoVendas.style.display = "block";
+  conteudoVendas.classList.remove("oculto");
 
   if (ehAdmin) {
     itemCardTeste.style.display = "block";
@@ -171,6 +196,7 @@ onAuthStateChanged(auth, async (usuario) => {
   escutarColunas();
   escutarCards();
   escutarConfiguracoes();
+  iniciarSistemaReordenacao();
 });
 
 // ------------------------------------------------------------
@@ -226,6 +252,15 @@ function escutarColunas() {
       cacheColunas.push({ id: documento.id, ...documento.data() });
     });
     cacheColunas.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+
+    const sequenciaCores = ["lilas", "amarelo", "verde"];
+    cacheColunas.forEach((coluna, indice) => {
+      if (!coluna.cor) {
+        coluna.cor = sequenciaCores[indice % sequenciaCores.length];
+        updateDoc(doc(db, "colunas", coluna.id), { cor: coluna.cor }).catch(() => {});
+      }
+    });
+
     renderizarKanban();
   });
 }
@@ -260,10 +295,19 @@ function escutarConfiguracoes() {
   });
 }
 
+setInterval(verificarEnviosDeColuna, 30000);
+
 // ------------------------------------------------------------
 // RENDERIZAR O KANBAN COMPLETO
 // ------------------------------------------------------------
+let renderizacaoPendente = false;
+
 function renderizarKanban() {
+  if (arrastoAtivo) {
+    renderizacaoPendente = true;
+    return;
+  }
+
   if (cacheColunas.length === 0) {
     kanban.innerHTML =
       '<p class="texto-ajuda">Nenhuma coluna criada ainda. Clique em "Nova coluna" para começar.</p>';
@@ -275,14 +319,6 @@ function renderizarKanban() {
   cacheColunas.forEach((coluna) => {
     kanban.appendChild(criarColuna(coluna));
   });
-
-  // Botão de adicionar coluna no fim
-  const botaoAdicionar = document.createElement("button");
-  botaoAdicionar.type = "button";
-  botaoAdicionar.className = "coluna-adicionar";
-  botaoAdicionar.textContent = "➕ Adicionar coluna";
-  botaoAdicionar.addEventListener("click", abrirCriacaoColuna);
-  kanban.appendChild(botaoAdicionar);
 }
 
 // ------------------------------------------------------------
@@ -294,6 +330,7 @@ function criarColuna(coluna) {
   const div = document.createElement("div");
   div.className = "coluna" + (coluna.tipo === "funcionaria" ? " coluna-funcionaria" : "");
   div.dataset.colunaId = coluna.id;
+  div.dataset.cor = coluna.cor || "lilas";
 
   // Cabeçalho
   const cabecalho = document.createElement("div");
@@ -460,19 +497,28 @@ function criarCard(card, coluna) {
   valor.textContent = formatarMoeda(card.valorNegociado);
   div.appendChild(valor);
 
-  // Descrição oculta
+  // Descrição oculta (abaixo do valor)
   if (card.descricao) {
-    const rotulo = document.createElement("span");
-    rotulo.className = "rotulo-descricao";
-    rotulo.textContent = "Ver descrição";
+    const rotulo = document.createElement("div");
+    rotulo.className = "linha-info linha-descricao";
+    const rotuloForte = document.createElement("strong");
+    rotuloForte.textContent = "Descrição:";
+    const rotuloTexto = document.createElement("span");
+    rotuloTexto.className = "rotulo-descricao";
+    rotuloTexto.textContent = "Ver descrição";
+    rotulo.appendChild(rotuloForte);
+    rotulo.appendChild(rotuloTexto);
+
     const texto = document.createElement("p");
     texto.className = "texto-descricao";
     texto.textContent = card.descricao;
-    rotulo.addEventListener("click", () => {
+
+    rotuloTexto.addEventListener("click", () => {
       texto.classList.toggle("visivel");
-      rotulo.textContent = texto.classList.contains("visivel")
+      rotuloTexto.textContent = texto.classList.contains("visivel")
         ? "Ocultar descrição" : "Ver descrição";
     });
+
     div.appendChild(rotulo);
     div.appendChild(texto);
   }
@@ -630,14 +676,13 @@ document.addEventListener("click", (evento) => {
 
 botaoNovaColuna.addEventListener("click", abrirCriacaoColuna);
 
-// ------------------------------------------------------------
-// BOTÃO VOLTAR
-// ------------------------------------------------------------
-botaoVoltar.addEventListener("click", () => {
-  if (window.confirm("Deseja realmente voltar para a página inicial?")) {
-    window.location.href = "home.html";
-  }
-});
+const botaoRecolherSidebar = document.getElementById("botao-recolher-sidebar");
+
+if (botaoRecolherSidebar) {
+  botaoRecolherSidebar.addEventListener("click", () => {
+    document.body.classList.toggle("sidebar-recolhida");
+  });
+}
 
 // ------------------------------------------------------------
 // SAIR
@@ -675,17 +720,14 @@ async function moverCard(cardId, colunaDestinoId) {
       ultimaAtividade: serverTimestamp(),
       programacao: null
     });
-
     await registrarHistoricoCard(cardId, "movimentacao", {
       de: colunaOrigem ? colunaOrigem.nome : "—",
       para: colunaDestino.nome
     });
-
     await registrarHistoricoColuna(colunaDestinoId, "entrada", card, {
       colunaOrigemId: card.colunaId,
       colunaDestinoId: colunaDestinoId
     });
-
     if (colunaOrigem) {
       await registrarHistoricoColuna(colunaOrigem.id, "saida", card, {
         colunaOrigemId: colunaOrigem.id,
@@ -696,6 +738,100 @@ async function moverCard(cardId, colunaDestinoId) {
     mostrarMensagem("Card movido para " + colunaDestino.nome + ".", "sucesso");
   } catch (erro) {
     mostrarMensagem("Erro ao mover o card.", "erro");
+  }
+}
+
+async function concluirMensagemColuna(card, coluna) {
+  const cfg = coluna.configFuncionaria || {};
+  if (!cfg.colunaDestinoId) {
+    mostrarMensagem("A coluna não tem destino configurado.", "erro");
+    return;
+  }
+  if (!window.confirm(
+    "Marcar a mensagem desta coluna como entregue para este card?"
+  )) return;
+
+  try {
+    await updateDoc(doc(db, "cards", card.id), {
+      entregaColunaEm: serverTimestamp(),
+      ultimaAtividade: serverTimestamp()
+    });
+    await registrarHistoricoCard(card.id, "programacao", {
+      dataHora: "mensagem da coluna entregue manualmente"
+    });
+    mostrarMensagem("Mensagem da coluna marcada como entregue.", "sucesso");
+    await avaliarGatilhoConclusao(card.id);
+  } catch (erro) {
+    mostrarMensagem("Erro ao concluir a mensagem da coluna.", "erro");
+  }
+}
+
+async function avaliarGatilhoConclusao(cardId) {
+  const card = cacheCards.find((c) => c.id === cardId);
+  if (!card) return;
+
+  const coluna = cacheColunas.find((c) => c.id === card.colunaId);
+  if (!coluna || coluna.tipo !== "funcionaria") return;
+
+  const cfg = coluna.configFuncionaria || {};
+  if (!cfg.colunaDestinoId) return;
+
+  const precisaColuna = cfg.moverAposMensagemColuna === true;
+  const precisaCard = cfg.moverAposMensagemCard === true;
+
+  const colunaEntregue = !!card.entregaColunaEm;
+  const cardEntregue = !!(card.programacao && card.programacao.status === "enviado");
+
+  const condicaoColuna = !precisaColuna || colunaEntregue;
+  const condicaoCard = !precisaCard || cardEntregue;
+
+  if (!condicaoColuna || !condicaoCard) return;
+
+  const destino = cacheColunas.find((c) => c.id === cfg.colunaDestinoId);
+  if (!destino) return;
+
+  try {
+    await updateDoc(doc(db, "cards", cardId), {
+      colunaId: cfg.colunaDestinoId,
+      entregaColunaEm: null,
+      ultimaAtividade: serverTimestamp()
+    });
+    await registrarHistoricoCard(cardId, "movimentacao", {
+      de: coluna.nome,
+      para: destino.nome
+    });
+    await registrarHistoricoColuna(cfg.colunaDestinoId, "entrada", card, {
+      colunaOrigemId: coluna.id,
+      colunaDestinoId: cfg.colunaDestinoId
+    });
+    await registrarHistoricoColuna(coluna.id, "saida", card, {
+      colunaOrigemId: coluna.id,
+      colunaDestinoId: cfg.colunaDestinoId
+    });
+    mostrarMensagem("Card movido automaticamente para " + destino.nome + ".", "sucesso");
+  } catch (erro) {
+    mostrarMensagem("Erro ao mover o card automaticamente.", "erro");
+  }
+}
+
+async function concluirMensagemCard(card) {
+  if (!window.confirm("Marcar a mensagem deste card como enviada?")) return;
+  try {
+    await updateDoc(doc(db, "cards", card.id), {
+      programacao: {
+        ...card.programacao,
+        status: "enviado",
+        enviadoEm: serverTimestamp()
+      },
+      ultimaAtividade: serverTimestamp()
+    });
+    await registrarHistoricoCard(card.id, "programacao", {
+      dataHora: "mensagem do card marcada como enviada"
+    });
+    mostrarMensagem("Mensagem do card marcada como enviada.", "sucesso");
+    await avaliarGatilhoConclusao(card.id);
+  } catch (erro) {
+    mostrarMensagem("Erro ao concluir a mensagem do card.", "erro");
   }
 }
 
@@ -804,11 +940,14 @@ function abrirMenuColuna(botao, coluna) {
 
   document.body.appendChild(menu);
   const rect = botao.getBoundingClientRect();
+  const larguraMenu = 210;
+  let esquerda = rect.right - larguraMenu;
+  if (esquerda < 8) esquerda = 8;
+  if (esquerda + larguraMenu > window.innerWidth - 8) {
+    esquerda = window.innerWidth - larguraMenu - 8;
+  }
   menu.style.top = (rect.bottom + 4) + "px";
-  menu.style.left = Math.max(8, Math.min(
-    rect.left,
-    window.innerWidth - 210
-  )) + "px";
+  menu.style.left = esquerda + "px";
 }
 
 // ------------------------------------------------------------
@@ -821,7 +960,27 @@ function abrirMenuCard(botao, card, coluna) {
   menu.className = "menu-opcoes";
 
   const opcoes = [
-    { texto: "📜 Histórico", acao: () => abrirHistoricoCard(card) },
+    { texto: "📜 Histórico", acao: () => abrirHistoricoCard(card) }
+  ];
+
+  const colunaDoCard = cacheColunas.find((c) => c.id === card.colunaId);
+  const ehColunaFuncionaria = colunaDoCard && colunaDoCard.tipo === "funcionaria";
+
+  if (ehColunaFuncionaria) {
+    opcoes.push({
+      texto: "✅ Concluir mensagem da coluna",
+      acao: () => concluirMensagemColuna(card, colunaDoCard)
+    });
+  }
+
+  if (card.programacao && card.programacao.status === "aguardando_envio") {
+    opcoes.push({
+      texto: "📨 Marcar mensagem do card como enviada",
+      acao: () => concluirMensagemCard(card)
+    });
+  }
+
+  opcoes.push(
     {
       texto: "🔴 Marcar como perdida",
       acao: () => marcarCard(card, "perdida")
@@ -829,13 +988,21 @@ function abrirMenuCard(botao, card, coluna) {
     {
       texto: "🟢 Marcar como finalizada",
       acao: () => marcarCard(card, "finalizada")
-    },
-    {
-      texto: "🗑️ Excluir card",
-      acao: () => excluirCard(card),
-      classe: "opcao-perigosa"
     }
-  ];
+  );
+
+  if (card.status === "perdida" || card.status === "finalizada") {
+    opcoes.push({
+      texto: "↩️ Desfazer marcação",
+      acao: () => desfazerMarcacao(card)
+    });
+  }
+
+  opcoes.push({
+    texto: "🗑️ Excluir card",
+    acao: () => excluirCard(card),
+    classe: "opcao-perigosa"
+  });
 
   opcoes.forEach((opcao) => {
     const item = document.createElement("button");
@@ -851,11 +1018,14 @@ function abrirMenuCard(botao, card, coluna) {
 
   document.body.appendChild(menu);
   const rect = botao.getBoundingClientRect();
+  const larguraMenu = 210;
+  let esquerda = rect.right - larguraMenu;
+  if (esquerda < 8) esquerda = 8;
+  if (esquerda + larguraMenu > window.innerWidth - 8) {
+    esquerda = window.innerWidth - larguraMenu - 8;
+  }
   menu.style.top = (rect.bottom + 4) + "px";
-  menu.style.left = Math.max(8, Math.min(
-    rect.left,
-    window.innerWidth - 210
-  )) + "px";
+  menu.style.left = esquerda + "px";
 }
 
 // ------------------------------------------------------------
@@ -902,11 +1072,15 @@ function abrirCriacaoColuna() {
     botaoSalvar.disabled = true;
     try {
       const ordem = cacheColunas.length;
+      const sequenciaCores = ["lilas", "amarelo", "verde"];
+      const corNova = sequenciaCores[cacheColunas.length % sequenciaCores.length];
+
       await addDoc(collection(db, "colunas"), {
         nome: nome,
         descricao: descricao,
         tipo: tipo,
         ordem: ordem,
+        cor: corNova,
         criadoPor: usuarioAtual,
         criadoEm: serverTimestamp()
       });
@@ -934,15 +1108,46 @@ function abrirCriacaoColuna() {
 function abrirEdicaoColuna(coluna) {
   const caixa = document.createElement("div");
   caixa.className = "modal-interno";
+  const coresDisponiveis = [
+    { id: "lilas", rotulo: "Lilás" },
+    { id: "pessego", rotulo: "Pêssego" },
+    { id: "verde", rotulo: "Verde" },
+    { id: "azul", rotulo: "Azul" },
+    { id: "rosa", rotulo: "Rosa" },
+    { id: "amarelo", rotulo: "Amarelo" }
+  ];
+  const corAtual = coluna.cor || "lilas";
+
+  let botoesCor = "";
+  coresDisponiveis.forEach((c) => {
+    const sel = c.id === corAtual ? " selecionada" : "";
+    botoesCor +=
+      '<button type="button" class="opcao-cor' + sel + '" ' +
+      'data-cor="' + c.id + '" title="' + c.rotulo + '"></button>';
+  });
+
   caixa.innerHTML =
     "<h3>Editar coluna</h3>" +
     "<label>Nome (obrigatório)</label>" +
     '<input type="text" id="col-nome">' +
     "<label>Descrição (opcional)</label>" +
-    '<input type="text" id="col-descricao">';
+    '<input type="text" id="col-descricao">' +
+    "<label>Cor de identificação</label>" +
+    '<div class="seletor-cores">' + botoesCor + "</div>";
 
   caixa.querySelector("#col-nome").value = coluna.nome;
   caixa.querySelector("#col-descricao").value = coluna.descricao || "";
+
+  let corSelecionada = corAtual;
+  caixa.querySelectorAll(".opcao-cor").forEach((botao) => {
+    botao.addEventListener("click", () => {
+      caixa.querySelectorAll(".opcao-cor").forEach((b) => {
+        b.classList.remove("selecionada");
+      });
+      botao.classList.add("selecionada");
+      corSelecionada = botao.dataset.cor;
+    });
+  });
 
   const botaoCancelar = document.createElement("button");
   botaoCancelar.textContent = "Cancelar";
@@ -963,7 +1168,11 @@ function abrirEdicaoColuna(coluna) {
 
     botaoSalvar.disabled = true;
     try {
-      await updateDoc(doc(db, "colunas", coluna.id), { nome, descricao });
+      await updateDoc(doc(db, "colunas", coluna.id), {
+        nome,
+        descricao,
+        cor: corSelecionada
+      });
       await registrarHistoricoColuna(coluna.id, "configuracao", {
         id: coluna.id, nomeConta: coluna.nome
       }, {});
@@ -1106,12 +1315,36 @@ function abrirConfiguracaoFuncionaria(coluna) {
     opcoesDestino += '<option value="' + c.id + '"' + sel + ">" + c.nome + "</option>";
   });
 
+  const marcarColuna = cfg.moverAposMensagemColuna !== false;
+  const marcarCard = cfg.moverAposMensagemCard === true;
+
   caixa.innerHTML =
     "<h3>Configurar coluna funcionária</h3>" +
     "<label>Mensagem automática (WhatsApp)</label>" +
     '<textarea id="cfg-mensagem"></textarea>' +
-    "<label>Gatilho de conclusão (descreva a condição)</label>" +
-    '<input type="text" id="cfg-gatilho" placeholder="Ex.: cliente confirmar o pedido">' +
+    "<label>Data do envio da mensagem da coluna</label>" +
+    '<input type="date" id="cfg-data">' +
+    "<label>Horário do envio</label>" +
+    '<input type="time" id="cfg-hora">' +
+    '<p class="texto-ajuda" style="margin-top:8px;">' +
+      "Todos os cards desta coluna receberão esta mensagem no horário definido acima, " +
+      "independentemente das opções marcadas abaixo. As opções definem apenas quando o card " +
+      "será movido. Mensagens programadas individualmente em cada card continuam valendo em paralelo." +
+    "</p>" +
+    "<label>Gatilho de conclusão</label>" +
+    '<div class="bloco-checkboxes">' +
+      '<label class="checkbox-linha">' +
+        '<input type="checkbox" id="cfg-mover-coluna"' + (marcarColuna ? " checked" : "") + ">" +
+        "<span>Mover após mensagem da coluna ser enviada</span>" +
+      "</label>" +
+      '<label class="checkbox-linha">' +
+        '<input type="checkbox" id="cfg-mover-card"' + (marcarCard ? " checked" : "") + ">" +
+        "<span>Mover após mensagem do card ser enviada</span>" +
+      "</label>" +
+    "</div>" +
+    '<p class="texto-ajuda" style="margin-top:8px;">' +
+      "Se as duas opções forem marcadas, o card só será movido depois da entrega de ambas." +
+    "</p>" +
     "<label>Coluna de destino ao concluir</label>" +
     '<select id="cfg-destino">' + opcoesDestino + "</select>" +
     '<p class="texto-ajuda" style="margin-top:12px;">' +
@@ -1120,7 +1353,11 @@ function abrirConfiguracaoFuncionaria(coluna) {
     "</p>";
 
   caixa.querySelector("#cfg-mensagem").value = cfg.mensagemWhatsapp || "";
-  caixa.querySelector("#cfg-gatilho").value = cfg.gatilhoConclusao || "";
+  if (cfg.dataHoraColuna && cfg.dataHoraColuna.seconds) {
+    const d = new Date(cfg.dataHoraColuna.seconds * 1000);
+    caixa.querySelector("#cfg-data").value = d.toISOString().slice(0, 10);
+    caixa.querySelector("#cfg-hora").value = d.toTimeString().slice(0, 5);
+  }
 
   const botaoCancelar = document.createElement("button");
   botaoCancelar.textContent = "Cancelar";
@@ -1132,12 +1369,24 @@ function abrirConfiguracaoFuncionaria(coluna) {
   botaoSalvar.className = "botao-modal";
   botaoSalvar.addEventListener("click", async () => {
     const mensagemWhatsapp = caixa.querySelector("#cfg-mensagem").value.trim();
-    const gatilhoConclusao = caixa.querySelector("#cfg-gatilho").value.trim();
+    const data = caixa.querySelector("#cfg-data").value;
+    const hora = caixa.querySelector("#cfg-hora").value;
     const colunaDestinoId = caixa.querySelector("#cfg-destino").value;
+    const moverAposMensagemColuna = caixa.querySelector("#cfg-mover-coluna").checked;
+    const moverAposMensagemCard = caixa.querySelector("#cfg-mover-card").checked;
 
     if (!colunaDestinoId) {
       mostrarMensagem("Selecione a coluna de destino.", "erro");
       return;
+    }
+    if (!moverAposMensagemColuna && !moverAposMensagemCard) {
+      mostrarMensagem("Marque ao menos um gatilho de conclusão.", "erro");
+      return;
+    }
+
+    let dataHoraColuna = null;
+    if (data && hora) {
+      dataHoraColuna = new Date(data + "T" + hora);
     }
 
     botaoSalvar.disabled = true;
@@ -1145,7 +1394,9 @@ function abrirConfiguracaoFuncionaria(coluna) {
       await updateDoc(doc(db, "colunas", coluna.id), {
         configFuncionaria: {
           mensagemWhatsapp,
-          gatilhoConclusao,
+          dataHoraColuna,
+          moverAposMensagemColuna,
+          moverAposMensagemCard,
           colunaDestinoId,
           modoDeteccao: "manual",
           configuradoPor: usuarioAtual
@@ -1168,7 +1419,6 @@ function abrirConfiguracaoFuncionaria(coluna) {
   linha.appendChild(botaoCancelar);
   linha.appendChild(botaoSalvar);
   caixa.appendChild(linha);
-
   abrirModal(caixa);
 }
 
@@ -1390,6 +1640,22 @@ async function marcarCard(card, status) {
   }
 }
 
+async function desfazerMarcacao(card) {
+  if (!window.confirm("Desfazer a marcação deste card?")) return;
+  try {
+    await updateDoc(doc(db, "cards", card.id), {
+      status: "ativa",
+      ultimaAtividade: serverTimestamp()
+    });
+    await registrarHistoricoCard(card.id, "marcacao", {
+      status: "ativa (marcação desfeita)"
+    });
+    mostrarMensagem("Marcação desfeita.", "sucesso");
+  } catch (erro) {
+    mostrarMensagem("Erro ao desfazer a marcação.", "erro");
+  }
+}
+
 // ------------------------------------------------------------
 // EXCLUIR CARD (soft delete)
 // ------------------------------------------------------------
@@ -1476,6 +1742,7 @@ function abrirProgramacao(card, coluna) {
       });
       mostrarMensagem("Mensagem programada.", "sucesso");
       fecharModal();
+      await avaliarGatilhoConclusao(card.id);
     } catch (erro) {
       mostrarMensagem("Erro ao programar a mensagem.", "erro");
     } finally {
@@ -1595,6 +1862,9 @@ function criarCartaoEvento(ev) {
     case "entrada": descricao = "Card entrou na coluna"; break;
     case "saida": descricao = "Card saiu da coluna"; break;
     case "configuracao": descricao = "Configuração alterada"; break;
+    case "reordenacao":
+      descricao = "Colunas reordenadas: " + (ev.detalhes?.ordem || "—");
+      break;
     default: descricao = ev.tipo || "Evento";
   }
 
@@ -1647,6 +1917,11 @@ async function abrirHistoricoGlobal() {
         todos.push({ ...d.data(), _origem: "card", _nome: card.nomeConta });
       });
     }
+
+    const snapGlobal = await getDocs(collection(db, "historicoGlobal"));
+    snapGlobal.forEach((d) => {
+      todos.push({ ...d.data(), _origem: "global", _nome: "Kanban" });
+    });
 
     todos.sort((a, b) => segundosDe(b.timestamp) - segundosDe(a.timestamp));
 
@@ -1811,3 +2086,416 @@ itemCardTeste.addEventListener("click", () => {
 modalOverlay.addEventListener("click", (evento) => {
   if (evento.target === modalOverlay) fecharModal();
 });
+
+function verificarEnviosDeColuna() {
+  const agora = Date.now();
+
+  cacheColunas.forEach(async (coluna) => {
+    if (coluna.tipo !== "funcionaria") return;
+
+    const cfg = coluna.configFuncionaria || {};
+    if (!cfg.dataHoraColuna || !cfg.dataHoraColuna.seconds) return;
+
+    const horarioEnvio = cfg.dataHoraColuna.seconds * 1000;
+    if (agora < horarioEnvio) return;
+
+    const cardsDaColuna = cacheCards.filter((c) => c.colunaId === coluna.id);
+
+    for (const card of cardsDaColuna) {
+      if (card.entregaColunaEm) continue;
+
+      try {
+        await updateDoc(doc(db, "cards", card.id), {
+          entregaColunaEm: serverTimestamp(),
+          ultimaAtividade: serverTimestamp()
+        });
+        await registrarHistoricoCard(card.id, "programacao", {
+          dataHora: "mensagem da coluna enviada automaticamente"
+        });
+        await avaliarGatilhoConclusao(card.id);
+      } catch (erro) {
+        // Silencioso: falha em um card não deve travar os demais.
+      }
+    }
+  });
+}
+
+// ------------------------------------------------------------
+// REORDENAÇÃO DE COLUNAS (somente administrador)
+// ------------------------------------------------------------
+let colunaSendoArrastada = null;
+let colunaFlutuante = null;
+let indicadorPosicao = null;
+let temporizadorBotao = null;
+let temporizadorParada = null;
+let ultimoMouseX = 0;
+let ultimoMouseY = 0;
+let deslocamentoColunaX = 0;
+let deslocamentoColunaY = 0;
+let novaOrdemColuna = null;
+let arrastoAtivo = false;
+let inicioMouseX = 0;
+let inicioMouseY = 0;
+
+function iniciarSistemaReordenacao() {
+  if (!ehAdmin) return;
+  if (kanban.dataset.reordenacaoAtiva === "true") return;
+  kanban.dataset.reordenacaoAtiva = "true";
+
+  kanban.addEventListener("contextmenu", (evento) => {
+    if (evento.target.closest(".coluna")) evento.preventDefault();
+  });
+
+  kanban.addEventListener("selectstart", (evento) => {
+    if (temporizadorBotao || arrastoAtivo) {
+      evento.preventDefault();
+    }
+  });
+
+  kanban.addEventListener("dragstart", (evento) => {
+    if (arrastoAtivo) {
+      evento.preventDefault();
+      return;
+    }
+    if (temporizadorBotao) {
+      clearTimeout(temporizadorBotao);
+      temporizadorBotao = null;
+    }
+  });
+
+  kanban.addEventListener("mousedown", (evento) => {
+    if (evento.button !== 0) return;
+    if (arrastoAtivo) return;
+    const coluna = evento.target.closest(".coluna");
+    if (!coluna) return;
+    if (evento.target.closest("button")) return;
+    if (evento.target.closest(".card-conversa")) return;
+
+    // Impede seleção de texto e arrasto nativo do navegador ao segurar o clique na coluna
+    evento.preventDefault();
+    if (window.getSelection) {
+      window.getSelection().removeAllRanges();
+    }
+
+    if (temporizadorBotao) {
+      clearTimeout(temporizadorBotao);
+      temporizadorBotao = null;
+    }
+
+    inicioMouseX = evento.clientX;
+    inicioMouseY = evento.clientY;
+    ultimoMouseX = evento.clientX;
+    ultimoMouseY = evento.clientY;
+    const colunaId = coluna.dataset.colunaId;
+
+    temporizadorBotao = setTimeout(() => {
+      temporizadorBotao = null;
+      const colunaAtual =
+        kanban.querySelector('.coluna[data-coluna-id="' + colunaId + '"]') || coluna;
+      if (!colunaAtual || !colunaAtual.isConnected) return;
+      iniciarArrastoColuna(colunaAtual, ultimoMouseX, ultimoMouseY);
+    }, 1000);
+  });
+
+  document.addEventListener("mousemove", (evento) => {
+    if (temporizadorBotao && !arrastoAtivo) {
+      const dx = Math.abs(evento.clientX - inicioMouseX);
+      const dy = Math.abs(evento.clientY - inicioMouseY);
+      if (dx > 10 || dy > 10) {
+        clearTimeout(temporizadorBotao);
+        temporizadorBotao = null;
+      }
+    }
+    if (arrastoAtivo) {
+      evento.preventDefault();
+      moverColunaFlutuante(evento);
+      atualizarIndicadorPosicao(evento);
+    }
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (temporizadorBotao) {
+      clearTimeout(temporizadorBotao);
+      temporizadorBotao = null;
+    }
+    if (arrastoAtivo) {
+      finalizarArrastoColuna();
+    }
+  });
+
+  document.addEventListener("keydown", (evento) => {
+    if (evento.key === "Escape" && arrastoAtivo) {
+      cancelarArrastoColuna();
+    }
+  });
+}
+
+function iniciarArrastoColuna(coluna, x, y) {
+  const rect = coluna.getBoundingClientRect();
+  arrastoAtivo = true;
+  colunaSendoArrastada = coluna;
+
+  colunaFlutuante = coluna.cloneNode(true);
+  colunaFlutuante.classList.remove("coluna-arrastando");
+  colunaFlutuante.classList.add("coluna-flutuante-coluna");
+  colunaFlutuante.style.width = rect.width + "px";
+  colunaFlutuante.style.height = rect.height + "px";
+  colunaFlutuante.style.left = rect.left + "px";
+  colunaFlutuante.style.top = rect.top + "px";
+  document.body.appendChild(colunaFlutuante);
+
+  deslocamentoColunaX = x - rect.left;
+  deslocamentoColunaY = y - rect.top;
+
+  coluna.classList.add("coluna-arrastando");
+  kanban.classList.add("arrastando-coluna");
+
+  indicadorPosicao = document.createElement("div");
+  indicadorPosicao.className = "indicador-posicao-coluna";
+  kanban.insertBefore(indicadorPosicao, coluna);
+
+  novaOrdemColuna = calcularNovaOrdem();
+
+  ultimoMouseX = x;
+  ultimoMouseY = y;
+  clearTimeout(temporizadorParada);
+
+  document.body.style.cursor = "grabbing";
+  document.body.style.userSelect = "none";
+}
+
+function moverColunaFlutuante(evento) {
+  if (!colunaFlutuante) return;
+  colunaFlutuante.style.left = (evento.clientX - deslocamentoColunaX) + "px";
+  colunaFlutuante.style.top = (evento.clientY - deslocamentoColunaY) + "px";
+
+  const dx = Math.abs(evento.clientX - ultimoMouseX);
+  const dy = Math.abs(evento.clientY - ultimoMouseY);
+  const emMovimento = dx > 2 || dy > 2;
+
+  if (emMovimento) {
+    colunaFlutuante.classList.remove("parada");
+    ultimoMouseX = evento.clientX;
+    ultimoMouseY = evento.clientY;
+    clearTimeout(temporizadorParada);
+    temporizadorParada = setTimeout(() => {
+      if (colunaFlutuante) colunaFlutuante.classList.add("parada");
+    }, 180);
+  }
+}
+
+function atualizarIndicadorPosicao(evento) {
+  const colunas = Array.from(kanban.querySelectorAll(".coluna"));
+  if (colunas.length === 0) return;
+
+  let alvo = null;
+  let inserirAntes = true;
+
+  for (const col of colunas) {
+    const rect = col.getBoundingClientRect();
+    const meio = rect.left + rect.width / 2;
+    if (evento.clientX < meio) {
+      alvo = col;
+      inserirAntes = true;
+      break;
+    }
+    alvo = col;
+    inserirAntes = false;
+  }
+
+  if (alvo) {
+    if (inserirAntes) {
+      kanban.insertBefore(indicadorPosicao, alvo);
+    } else {
+      kanban.insertBefore(indicadorPosicao, alvo.nextSibling);
+    }
+  } else {
+    kanban.appendChild(indicadorPosicao);
+  }
+
+  novaOrdemColuna = calcularNovaOrdem();
+}
+
+function calcularNovaOrdem() {
+  const filhos = Array.from(kanban.children);
+  const indiceIndicador = filhos.indexOf(indicadorPosicao);
+  const colunas = filhos.filter((el) => el.classList.contains("coluna"));
+
+  let destino = 0;
+  for (let i = 0; i < indiceIndicador; i++) {
+    if (filhos[i].classList.contains("coluna") && filhos[i] !== colunaSendoArrastada) {
+      destino++;
+    }
+  }
+
+  const ordem = colunas
+    .filter((c) => c !== colunaSendoArrastada)
+    .map((c) => c.dataset.colunaId);
+
+  ordem.splice(destino, 0, colunaSendoArrastada.dataset.colunaId);
+  return ordem;
+}
+
+async function finalizarArrastoColuna() {
+  const ordemFinal = novaOrdemColuna;
+  const ordemAnterior = cacheColunas.map((c) => c.id);
+  limparEstadoArrastoColuna();
+
+  if (!ordemFinal || ordemFinal.length === 0) return;
+
+  const mudouOrdem =
+    ordemFinal.length !== ordemAnterior.length ||
+    ordemFinal.some((id, idx) => id !== ordemAnterior[idx]);
+  if (!mudouOrdem) return;
+
+  try {
+    for (let i = 0; i < ordemFinal.length; i++) {
+      await updateDoc(doc(db, "colunas", ordemFinal[i]), { ordem: i });
+    }
+    await registrarHistoricoGlobal("reordenacao", {
+      ordem: ordemFinal.map((id) => {
+        const c = cacheColunas.find((x) => x.id === id);
+        return c ? c.nome : id;
+      }).join(" → ")
+    });
+    mostrarMensagem("Colunas reordenadas.", "sucesso");
+  } catch (erro) {
+    mostrarMensagem("Erro ao reordenar as colunas.", "erro");
+  }
+}
+
+function cancelarArrastoColuna() {
+  limparEstadoArrastoColuna();
+  mostrarMensagem("Reordenação cancelada.", "erro");
+}
+
+function limparEstadoArrastoColuna() {
+  arrastoAtivo = false;
+  if (colunaFlutuante) {
+    colunaFlutuante.remove();
+    colunaFlutuante = null;
+  }
+  if (indicadorPosicao) {
+    indicadorPosicao.remove();
+    indicadorPosicao = null;
+  }
+  if (colunaSendoArrastada) {
+    colunaSendoArrastada.classList.remove("coluna-arrastando");
+    colunaSendoArrastada = null;
+  }
+  kanban.classList.remove("arrastando-coluna");
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
+  novaOrdemColuna = null;
+
+  if (renderizacaoPendente) {
+    renderizacaoPendente = false;
+    renderizarKanban();
+  }
+}
+
+async function registrarHistoricoGlobal(tipo, detalhes) {
+  try {
+    await addDoc(collection(db, "historicoGlobal"), {
+      tipo: tipo,
+      autor: usuarioAtual,
+      detalhes: detalhes || {},
+      timestamp: serverTimestamp()
+    });
+  } catch (erro) {
+    // Silencioso: falha no histórico não deve quebrar a ação principal.
+  }
+}
+
+// ------------------------------------------------------------
+// BARRA DE ROLAGEM CUSTOMIZADA
+// ------------------------------------------------------------
+function montarBarraCustomizada(scrollEl) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "barra-custom-wrapper";
+
+  const thumb = document.createElement("div");
+  thumb.className = "barra-custom-thumb";
+  wrapper.appendChild(thumb);
+
+  const container = scrollEl.parentElement;
+  if (!container) return;
+  container.appendChild(wrapper);
+
+  let arrastando = false;
+  let inicioY = 0;
+  let scrollInicial = 0;
+
+  function atualizar() {
+    const alturaVisivel = scrollEl.clientHeight;
+    const alturaTotal = scrollEl.scrollHeight;
+
+    if (alturaTotal <= alturaVisivel + 4) {
+      wrapper.classList.remove("visivel");
+      return;
+    }
+    wrapper.classList.add("visivel");
+
+    const alturaWrapper = wrapper.clientHeight;
+    const proporcao = alturaVisivel / alturaTotal;
+    const alturaThumb = Math.min(
+      alturaWrapper,
+      Math.max(44, alturaWrapper * proporcao)
+    );
+    const espacoLivre = alturaWrapper - alturaThumb;
+    const progresso = scrollEl.scrollTop / (alturaTotal - alturaVisivel);
+
+    thumb.style.height = alturaThumb + "px";
+    thumb.style.top = (progresso * espacoLivre) + "px";
+  }
+
+  thumb.addEventListener("mousedown", (evento) => {
+    evento.preventDefault();
+    arrastando = true;
+    inicioY = evento.clientY;
+    scrollInicial = scrollEl.scrollTop;
+    thumb.classList.add("arrastando");
+    document.body.style.userSelect = "none";
+  });
+
+  document.addEventListener("mousemove", (evento) => {
+    if (!arrastando) return;
+    const alturaVisivel = scrollEl.clientHeight;
+    const alturaTotal = scrollEl.scrollHeight;
+    const alturaThumb = thumb.offsetHeight;
+    const espacoLivre = wrapper.clientHeight - alturaThumb;
+    if (espacoLivre <= 0) return;
+
+    const delta = evento.clientY - inicioY;
+    const deltaScroll = (delta / espacoLivre) * (alturaTotal - alturaVisivel);
+    scrollEl.scrollTop = scrollInicial + deltaScroll;
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (!arrastando) return;
+    arrastando = false;
+    thumb.classList.remove("arrastando");
+    document.body.style.userSelect = "";
+  });
+
+  wrapper.addEventListener("mousedown", (evento) => {
+    if (evento.target === thumb) return;
+    const rect = wrapper.getBoundingClientRect();
+    const cliqueY = evento.clientY - rect.top;
+    const proporcao = cliqueY / rect.height;
+    const alturaTotal = scrollEl.scrollHeight;
+    const alturaVisivel = scrollEl.clientHeight;
+    scrollEl.scrollTop = proporcao * (alturaTotal - alturaVisivel);
+  });
+
+  scrollEl.addEventListener("scroll", atualizar);
+  window.addEventListener("resize", atualizar);
+
+  if (window.ResizeObserver) {
+    const observador = new ResizeObserver(atualizar);
+    observador.observe(scrollEl);
+  }
+
+  atualizar();
+  return { atualizar };
+}

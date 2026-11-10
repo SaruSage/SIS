@@ -3,11 +3,8 @@
   ============================================================
   PROJETO GOLDEN — Módulo de Vendas (Kanban)
   ============================================================
-  Estrutura:
-  1. CABEÇALHO → saudação, botão voltar, perfil
-  2. BARRA DE CONTROLES → busca + menu sanduíche
-  3. KANBAN → colunas com scroll horizontal
-  4. MODAL GENÉRICO → reaproveitado do padrão do estoque
+  Layout com sidebar de navegação, cabeçalho com busca e
+  board de colunas coloridas.
   A página é PROTEGIDA: o vendas.js só revela o conteúdo
   depois de confirmar cargo "vendas" ou "administracao".
   ============================================================
@@ -24,77 +21,156 @@
 
   <div id="conteudo-protegido" class="oculto">
 
-    <!-- ============ CABEÇALHO ============ -->
-    <header class="cabecalho-modulo">
-      <span class="saudacao-header">
-        Logado como <strong id="nome-usuario">...</strong>
-      </span>
-      <div class="acoes-cabecalho">
-        <button type="button" id="botao-voltar" class="botao-icone-header" title="Voltar">
-          ←
-        </button>
-        <div class="perfil-wrapper">
-          <button type="button" id="botao-perfil" class="botao-icone-header" title="Perfil">
-            <span id="avatar" class="avatar-header">?</span>
-          </button>
-          <div id="menu-perfil" class="menu-flutuante">
-            <button type="button" id="item-sair" class="item-menu-perfil item-sair">
-              🚪 Sair
-            </button>
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <span class="logo-marca">◆</span>
+        <span class="logo-texto">Projeto Golden</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="home.html" class="nav-item">
+          <span class="nav-icone">⌂</span>
+          <span class="nav-rotulo">Home</span>
+        </a>
+        <a href="vendas.html" class="nav-item nav-ativo">
+          <span class="nav-icone">▤</span>
+          <span class="nav-rotulo">Vendas</span>
+        </a>
+        <a href="estoque.html" class="nav-item">
+          <span class="nav-icone">▣</span>
+          <span class="nav-rotulo">Estoque</span>
+        </a>
+        <a href="#" class="nav-item">
+          <span class="nav-icone">⚙</span>
+          <span class="nav-rotulo">Produção</span>
+        </a>
+        <a href="#" class="nav-item">
+          <span class="nav-icone">▦</span>
+          <span class="nav-rotulo">Consultoria</span>
+        </a>
+        <a href="adm.html" class="nav-item" id="nav-admin" style="display:none;">
+          <span class="nav-icone">✦</span>
+          <span class="nav-rotulo">Administração</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-rodape">
+        <div class="card-controle">
+          <p class="controle-titulo">Centro de controle</p>
+          <div class="controle-linha">
+            <span class="controle-rotulo">Usuários ativos</span>
+            <span class="controle-valor">—</span>
+          </div>
+          <div class="controle-linha">
+            <span class="controle-rotulo">Solicitações</span>
+            <span class="controle-valor">—</span>
           </div>
         </div>
       </div>
-    </header>
+    </aside>
 
-    <p id="acesso-negado" class="mensagem erro" style="display:none;">
-      Esta área é restrita aos setores de Vendas e Administração.
-    </p>
+    <!-- ============ ÁREA PRINCIPAL ============ -->
+    <div class="area-principal">
 
-    <div id="conteudo-vendas" style="display:none;">
-
-      <!-- ============ BARRA DE CONTROLES ============ -->
-      <div class="barra-kanban">
-        <input
-          type="text"
-          id="busca-card"
-          class="campo-busca-kanban"
-          placeholder="Buscar por nome, telefone ou e-mail..."
-          autocomplete="off"
-        />
-
-        <button type="button" id="botao-nova-coluna" class="botao-nova-coluna">
-          ➕ Nova coluna
-        </button>
-
-        <div class="sanduiche-wrapper">
-          <button type="button" id="botao-menu-kanban" class="botao-sanduiche" title="Opções">
-            ☰
+      <!-- ============ CABEÇALHO ============ -->
+      <header class="cabecalho-modulo">
+        <div class="cabecalho-esquerda">
+          <button type="button" id="botao-recolher-sidebar" class="botao-icone-header botao-hamburguer" title="Recolher menu">
+            <span class="hamburguer-linha"></span>
+            <span class="hamburguer-linha"></span>
+            <span class="hamburguer-linha"></span>
           </button>
-          <div id="menu-kanban" class="menu-flutuante menu-kanban">
-            <button type="button" id="item-excluidos" class="item-menu-perfil">
-              🗑️ Ver excluídos
-            </button>
-            <button type="button" id="item-historico-global" class="item-menu-perfil">
-              📜 Histórico geral
-            </button>
-            <button type="button" id="item-configuracoes" class="item-menu-perfil">
-              ⚙️ Configurações
-            </button>
-            <button type="button" id="item-card-teste" class="item-menu-perfil" style="display:none;">
-              🎲 Gerar card de teste
-            </button>
+        </div>
+
+        <div class="cabecalho-centro">
+          <div class="busca-wrapper">
+            <svg class="busca-icone" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input
+              type="text"
+              id="busca-card"
+              class="campo-busca-kanban"
+              placeholder="Buscar por nome, telefone ou e-mail..."
+              autocomplete="off"
+            />
           </div>
         </div>
+
+        <div class="acoes-cabecalho">
+          <button type="button" class="botao-icone-header" title="Notificações">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+            </svg>
+          </button>
+          <div class="perfil-wrapper">
+            <button type="button" id="botao-perfil" class="botao-perfil-header">
+              <span id="avatar" class="avatar-header">?</span>
+              <span id="nome-usuario" class="nome-header">...</span>
+              <span class="seta-header">▾</span>
+            </button>
+            <div id="menu-perfil" class="menu-flutuante">
+              <button type="button" id="item-sair" class="item-menu-perfil item-sair">
+                🚪 Sair
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <p id="acesso-negado" class="mensagem erro" style="display:none;">
+        Esta área é restrita aos setores de Vendas e Administração.
+      </p>
+
+      <div id="conteudo-vendas" class="oculto">
+
+        <!-- ============ TÍTULO + AÇÕES ============ -->
+        <div class="barra-kanban">
+          <div class="titulo-area">
+            <h1 class="titulo-pagina">Vendas</h1>
+            <p class="subtitulo-pagina">Kanban de conversas</p>
+          </div>
+
+          <div class="acoes-kanban">
+            <button type="button" id="botao-nova-coluna" class="botao-nova-coluna">
+              + Nova coluna
+            </button>
+
+            <div class="sanduiche-wrapper">
+              <button type="button" id="botao-menu-kanban" class="botao-sanduiche" title="Opções">
+                ☰
+              </button>
+              <div id="menu-kanban" class="menu-flutuante menu-kanban">
+                <button type="button" id="item-excluidos" class="item-menu-perfil">
+                  🗑️ Ver excluídos
+                </button>
+                <button type="button" id="item-historico-global" class="item-menu-perfil">
+                  📜 Histórico geral
+                </button>
+                <button type="button" id="item-configuracoes" class="item-menu-perfil">
+                  ⚙️ Configurações
+                </button>
+                <button type="button" id="item-card-teste" class="item-menu-perfil" style="display:none;">
+                  🎲 Gerar card de teste
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ KANBAN ============ -->
+        <div id="kanban" class="kanban">
+          <p class="texto-ajuda">Carregando colunas...</p>
+        </div>
+
       </div>
 
-      <!-- ============ KANBAN ============ -->
-      <div id="kanban" class="kanban">
-        <p class="texto-ajuda">Carregando colunas...</p>
-      </div>
+      <p id="mensagem" class="mensagem"></p>
 
     </div>
-
-    <p id="mensagem" class="mensagem"></p>
 
   </div>
 
