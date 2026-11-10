@@ -526,14 +526,56 @@ function criarCard(card, coluna) {
   }
 
   // Drag
+  let cardFlutuante = null;
+  let deslocamentoX = 0;
+  let deslocamentoY = 0;
+
   div.addEventListener("dragstart", (evento) => {
     cardArrastado = card.id;
-    div.classList.add("arrastando");
     evento.dataTransfer.effectAllowed = "move";
+    evento.dataTransfer.setData("text/plain", card.id);
+
+    const rect = div.getBoundingClientRect();
+
+    cardFlutuante = div.cloneNode(true);
+    cardFlutuante.classList.remove("arrastando");
+    cardFlutuante.classList.add("card-flutuante-arrasto");
+    cardFlutuante.style.width = rect.width + "px";
+    cardFlutuante.style.height = rect.height + "px";
+    cardFlutuante.style.left = rect.left + "px";
+    cardFlutuante.style.top = rect.top + "px";
+    document.body.appendChild(cardFlutuante);
+
+    deslocamentoX = evento.clientX - rect.left;
+    deslocamentoY = evento.clientY - rect.top;
+
+    // Imagem de arrasto invisível: desliga o fantasma nativo do navegador.
+    const vazio = document.createElement("div");
+    vazio.style.width = "1px";
+    vazio.style.height = "1px";
+    vazio.style.opacity = "0";
+    document.body.appendChild(vazio);
+    evento.dataTransfer.setDragImage(vazio, 0, 0);
+    setTimeout(() => vazio.remove(), 0);
+
+    requestAnimationFrame(() => {
+      div.classList.add("arrastando");
+    });
+  });
+
+  div.addEventListener("drag", (evento) => {
+    if (!cardFlutuante) return;
+    if (evento.clientX === 0 && evento.clientY === 0) return;
+    cardFlutuante.style.left = (evento.clientX - deslocamentoX) + "px";
+    cardFlutuante.style.top = (evento.clientY - deslocamentoY) + "px";
   });
 
   div.addEventListener("dragend", () => {
     div.classList.remove("arrastando");
+    if (cardFlutuante) {
+      cardFlutuante.remove();
+      cardFlutuante = null;
+    }
     cardArrastado = null;
     document.querySelectorAll(".coluna").forEach((c) =>
       c.classList.remove("arrastando-sobre")

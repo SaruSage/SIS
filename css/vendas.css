@@ -308,17 +308,30 @@ body {
   position: relative;
   color: #1a2740;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
-  transition: box-shadow 0.15s, transform 0.15s;
 }
 
 .card-conversa:hover {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
-  transform: translateY(-1px);
 }
 
 .card-conversa.arrastando {
-  opacity: 0.35;
   cursor: grabbing;
+  visibility: hidden;
+}
+
+.card-flutuante-arrasto {
+  position: fixed !important;
+  margin: 0 !important;
+  pointer-events: none !important;
+  z-index: 99999 !important;
+  opacity: 1 !important;
+  filter: none !important;
+  transform: rotate(1.5deg) !important;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55) !important;
+  background: #ffffff !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  transition: none !important;
 }
 
 .card-conversa.card-perdida {
