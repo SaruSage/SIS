@@ -26,6 +26,14 @@ import {
   query, where, getDocs, serverTimestamp, deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+import {
+  iniciarLayoutBase,
+  aplicarPermissoesSidebar,
+  obterDadosUsuario,
+  atualizarCabecalhoUsuario
+} from "./layout-base.js";
+import { substituirIcones } from "./icones.js";
+
 // ------------------------------------------------------------
 // LISTA DE ADMINISTRADORES + CARGOS AUTORIZADOS
 // ------------------------------------------------------------
@@ -39,8 +47,15 @@ let cacheColunas = [];        // colunas ativas
 let cacheCards = [];          // cards ativos (sem excluídos)
 let cacheCardsExcluidos = []; // cards com excluido === true
 let usuarioAtual = null;      // { uid, email, nome }
+let cargoAtual = null;
 let ehAdmin = false;
 let termoBusca = "";
+let filtroPrioridadeSelecionada = "";
+let ordenacaoColunas = {};
+try {
+  const salvo = localStorage.getItem("golden_ordenacao_colunas");
+  if (salvo) ordenacaoColunas = JSON.parse(salvo);
+} catch (e) {}
 let colunaArrastada = null;   // id da coluna de origem do drag
 let cardArrastado = null;     // id do card em drag
 let configKanban = {          // configurações globais
@@ -59,7 +74,7 @@ const conteudoVendas = document.getElementById("conteudo-vendas");
 const botaoPerfil = document.getElementById("botao-perfil");
 const menuPerfil = document.getElementById("menu-perfil");
 const itemSair = document.getElementById("item-sair");
-const buscaCard = document.getElementById("busca-card");
+const buscaCard = document.getElementById("campo-busca") || document.getElementById("busca-card");
 const botaoNovaColuna = document.getElementById("botao-nova-coluna");
 const botaoMenuKanban = document.getElementById("botao-menu-kanban");
 const menuKanban = document.getElementById("menu-kanban");
@@ -102,7 +117,16 @@ function formatarDataCurta(timestamp) {
 }
 
 function segundosDe(timestamp) {
-  return (timestamp && timestamp.seconds) || 0;
+  if (!timestamp) return 0;
+  if (typeof timestamp.seconds === "number") return timestamp.seconds;
+  if (typeof timestamp.toDate === "function") return Math.floor(timestamp.toDate().getTime() / 1000);
+  if (timestamp instanceof Date) return Math.floor(timestamp.getTime() / 1000);
+  if (typeof timestamp === "number") {
+    return timestamp > 1e11 ? Math.floor(timestamp / 1000) : timestamp;
+  }
+  const d = new Date(timestamp);
+  if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+  return 0;
 }
 
 function abrirModal(caixa) {
@@ -138,8 +162,10 @@ function abrirModal(caixa) {
 }
 
 function fecharModal() {
+  fecharCalendarioFofo();
   modalOverlay.style.display = "none";
   modalConteudo.innerHTML = "";
+  modalConteudo.classList.remove("modal-conteudo-largo");
 }
 
 function fecharMenuOpcoes() {
@@ -160,12 +186,15 @@ onAuthStateChanged(auth, async (usuario) => {
   const ehAdminEmail = ADMINISTRADORES.includes(email);
 
   let autorizado = ehAdminEmail;
-  let cargo = null;
+  cargoAtual = null;
 
   if (!autorizado) {
     const resultado = await usuarioTemCargoAutorizado(email);
     autorizado = resultado.autorizado;
-    cargo = resultado.cargo;
+    cargoAtual = resultado.cargo;
+  } else {
+    const resultado = await usuarioTemCargoAutorizado(email);
+    cargoAtual = resultado.cargo || "administracao";
   }
 
   if (!autorizado) {
@@ -174,23 +203,23 @@ onAuthStateChanged(auth, async (usuario) => {
     return;
   }
 
-  ehAdmin = ehAdminEmail || cargo === "administracao";
+  ehAdmin = ehAdminEmail || cargoAtual === "administracao";
 
-  const nomeCompleto = await obterNomeUsuario(usuario.email);
+  const dadosUsuario = await obterDadosUsuario(usuario, db);
   usuarioAtual = {
     uid: usuario.uid,
     email: usuario.email,
-    nome: nomeCompleto
+    nome: dadosUsuario.nomeCompleto
   };
 
   conteudoProtegido.classList.remove("oculto");
-  const primeiroNome = nomeCompleto.split(" ")[0];
-  nomeUsuario.textContent = primeiroNome;
-  avatar.textContent = primeiroNome.charAt(0).toUpperCase();
+  iniciarLayoutBase();
+  aplicarPermissoesSidebar(cargoAtual, ehAdmin);
+  atualizarCabecalhoUsuario(dadosUsuario);
   conteudoVendas.classList.remove("oculto");
 
   if (ehAdmin) {
-    itemCardTeste.style.display = "block";
+    itemCardTeste.style.display = "";
   }
 
   escutarColunas();
@@ -228,15 +257,8 @@ async function usuarioTemCargoAutorizado(email) {
 // ------------------------------------------------------------
 async function obterNomeUsuario(email) {
   try {
-    const resultado = await getDocs(collection(db, "solicitacoes"));
-    let nome = email;
-    resultado.forEach((documento) => {
-      const dados = documento.data();
-      if ((dados.email || "").toLowerCase() === email.toLowerCase() && dados.nome) {
-        nome = dados.nome;
-      }
-    });
-    return nome;
+    const dados = await obterDadosUsuario({ email }, db);
+    return dados.nomeCompleto;
   } catch (erro) {
     return email;
   }
@@ -319,7 +341,66 @@ function renderizarKanban() {
   cacheColunas.forEach((coluna) => {
     kanban.appendChild(criarColuna(coluna));
   });
+
+  sincronizarAlturaColunas();
+  atualizarArredondamentoCabecalhos();
 }
+
+// Garante que todas as .coluna tenham a mesma altura total de rolagem
+// do .kanban, mantendo todos os .cabecalho-coluna (sticky) sempre visíveis
+// mesmo nas colunas curtas ou vazias, sem esticar o fundo visual (.corpo-coluna).
+function sincronizarAlturaColunas() {
+  const colunas = Array.from(kanban.querySelectorAll(".coluna"));
+  if (colunas.length === 0) return;
+
+  colunas.forEach((c) => {
+    c.style.minHeight = "";
+  });
+
+  let maiorAltura = kanban.clientHeight;
+  colunas.forEach((c) => {
+    const cab = c.querySelector(".cabecalho-coluna");
+    const corpo = c.querySelector(".corpo-coluna");
+    const h = (cab ? cab.offsetHeight : 0) + (corpo ? corpo.offsetHeight : 0) + 5;
+    if (h > maiorAltura) maiorAltura = h;
+  });
+
+  colunas.forEach((c) => {
+    c.style.minHeight = maiorAltura + "px";
+  });
+}
+
+// Arredonda os cantos inferiores do cabeçalho da coluna apenas quando
+// nenhum pedaço do corpo dos cards está visível abaixo dele na rolagem.
+function atualizarArredondamentoCabecalhos() {
+  const colunas = kanban.querySelectorAll(".coluna");
+  colunas.forEach((col) => {
+    const cab = col.querySelector(".cabecalho-coluna");
+    const corpo = col.querySelector(".corpo-coluna");
+    if (!cab || !corpo) return;
+
+    const cabRect = cab.getBoundingClientRect();
+    const corpoRect = corpo.getBoundingClientRect();
+
+    // Se o fundo do corpo não ultrapassa o fundo do cabeçalho,
+    // apenas o cabeçalho está visível nesta rolagem.
+    const soCabecalhoVisivel = corpoRect.bottom <= (cabRect.bottom + 2);
+
+    if (soCabecalhoVisivel) {
+      cab.classList.add("cabecalho-isolado");
+    } else {
+      cab.classList.remove("cabecalho-isolado");
+    }
+  });
+}
+
+window.addEventListener("resize", () => {
+  sincronizarAlturaColunas();
+  atualizarArredondamentoCabecalhos();
+  if (cardArrastado && colunaFantasmaAtual) {
+    atualizarPosicaoFantasma(colunaFantasmaAtual);
+  }
+});
 
 // ------------------------------------------------------------
 // CRIAR ELEMENTO DE COLUNA
@@ -347,7 +428,7 @@ function criarColuna(coluna) {
   const botaoPontos = document.createElement("button");
   botaoPontos.type = "button";
   botaoPontos.className = "botao-tres-pontos-card";
-  botaoPontos.textContent = "⋮";
+  botaoPontos.innerHTML = '<span data-icone="tres_pontos" data-tamanho="14"></span>';
   botaoPontos.title = "Opções da coluna";
   botaoPontos.addEventListener("click", (evento) => {
     evento.stopPropagation();
@@ -400,25 +481,51 @@ function criarColuna(coluna) {
     });
   }
 
-  // Drag and drop
-  corpo.addEventListener("dragover", (evento) => {
-    evento.preventDefault();
-    div.classList.add("arrastando-sobre");
-  });
-
-  corpo.addEventListener("dragleave", () => {
-    div.classList.remove("arrastando-sobre");
-  });
-
-  corpo.addEventListener("drop", async (evento) => {
-    evento.preventDefault();
-    div.classList.remove("arrastando-sobre");
+  // Drag and drop na coluna inteira (cobre cabeçalho, corpo e área abaixo da coluna)
+  const aoArrastarSobre = (evento) => {
     if (!cardArrastado) return;
-    await moverCard(cardArrastado, coluna.id);
+    if (coluna.id === colunaArrastada) {
+      limparDestaquesArrastoCard();
+      return;
+    }
+    evento.preventDefault();
+    evento.dataTransfer.dropEffect = "move";
+    destacarColunaAlvo(div);
+    mostrarColunaFantasma(div, evento.clientY);
+  };
+
+  const aoSairDaColuna = (evento) => {
+    if (div.contains(evento.relatedTarget)) return;
+    div.classList.remove("arrastando-sobre");
+    if (colunaFantasmaAtual === div) {
+      esconderColunaFantasma();
+    }
+  };
+
+  const aoSoltarNaColuna = async (evento) => {
+    if (!cardArrastado) return;
+    evento.preventDefault();
+    evento.stopPropagation();
+    const idCard = cardArrastado;
+    const idOrigem = colunaArrastada;
     cardArrastado = null;
-  });
+    colunaArrastada = null;
+    limparDestaquesArrastoCard();
+    if (coluna.id && coluna.id !== idOrigem) {
+      await moverCard(idCard, coluna.id);
+    }
+  };
+
+  corpo.addEventListener("dragover", aoArrastarSobre);
+  corpo.addEventListener("dragleave", aoSairDaColuna);
+  corpo.addEventListener("drop", aoSoltarNaColuna);
+
+  div.addEventListener("dragover", aoArrastarSobre);
+  div.addEventListener("dragleave", aoSairDaColuna);
+  div.addEventListener("drop", aoSoltarNaColuna);
 
   div.appendChild(corpo);
+  substituirIcones(div);
   return div;
 }
 
@@ -427,6 +534,12 @@ function criarColuna(coluna) {
 // ------------------------------------------------------------
 function cardsFiltradosDaColuna(colunaId) {
   let lista = cacheCards.filter((c) => c.colunaId === colunaId);
+
+  if (filtroPrioridadeSelecionada) {
+    lista = lista.filter(
+      (c) => (c.prioridade || "").toLowerCase() === filtroPrioridadeSelecionada.toLowerCase()
+    );
+  }
 
   if (termoBusca) {
     const termo = termoBusca.toLowerCase();
@@ -441,10 +554,47 @@ function cardsFiltradosDaColuna(colunaId) {
     });
   }
 
-  lista.sort((a, b) =>
-    segundosDe(b.ultimaAtividade || b.criadoEm) -
-    segundosDe(a.ultimaAtividade || a.criadoEm)
-  );
+  const modo = ordenacaoColunas[colunaId] || "padrao";
+
+  if (modo === "prioridade") {
+    // Organiza os cards da coluna da prioridade Alta, para Média, para Sem Marcação, para Baixa
+    const peso = {
+      alta: 1,
+      media: 2,
+      "": 3,
+      baixa: 4
+    };
+    lista.sort((a, b) => {
+      const pa = (a.prioridade || "").toLowerCase();
+      const pb = (b.prioridade || "").toLowerCase();
+      const pesoA = peso[pa] !== undefined ? peso[pa] : 3;
+      const pesoB = peso[pb] !== undefined ? peso[pb] : 3;
+      if (pesoA !== pesoB) {
+        return pesoA - pesoB;
+      }
+      return segundosDe(b.ultimaAtividade || b.criadoEm) - segundosDe(a.ultimaAtividade || a.criadoEm);
+    });
+  } else if (modo === "nome") {
+    // Organiza os cards da coluna pelo nome
+    lista.sort((a, b) => {
+      const nomeA = (a.nomeConta || "").trim();
+      const nomeB = (b.nomeConta || "").trim();
+      return nomeA.localeCompare(nomeB, "pt-BR", { sensitivity: "base" });
+    });
+  } else if (modo === "tempo") {
+    // Organiza a ordem dos cards do card mais antigo para o card mais novo
+    lista.sort((a, b) => {
+      const tempoA = segundosDe(a.iniciadoEm || a.criadoEm || a.ultimaAtividade);
+      const tempoB = segundosDe(b.iniciadoEm || b.criadoEm || b.ultimaAtividade);
+      return tempoA - tempoB;
+    });
+  } else {
+    // Padrão: mais recente primeiro
+    lista.sort((a, b) =>
+      segundosDe(b.ultimaAtividade || b.criadoEm) -
+      segundosDe(a.ultimaAtividade || a.criadoEm)
+    );
+  }
 
   return lista;
 }
@@ -474,11 +624,24 @@ function criarCard(card, coluna) {
     div.appendChild(aviso);
   }
 
-  // Nome do cliente
+  // Linha do nome do cliente + aviso de prioridade
+  const linhaNome = document.createElement("div");
+  linhaNome.className = "linha-nome-cliente";
+
   const nome = document.createElement("p");
   nome.className = "nome-cliente";
   nome.textContent = card.nomeConta || "Sem nome";
-  div.appendChild(nome);
+  linhaNome.appendChild(nome);
+
+  if (card.prioridade) {
+    const p = card.prioridade.toLowerCase();
+    const avisoPrioridade = document.createElement("span");
+    avisoPrioridade.className = "aviso-prioridade aviso-prioridade-" + p;
+    avisoPrioridade.textContent = p.charAt(0).toUpperCase() + p.slice(1);
+    linhaNome.appendChild(avisoPrioridade);
+  }
+
+  div.appendChild(linhaNome);
 
   // Data de início
   const dataInicio = document.createElement("p");
@@ -517,6 +680,7 @@ function criarCard(card, coluna) {
       texto.classList.toggle("visivel");
       rotuloTexto.textContent = texto.classList.contains("visivel")
         ? "Ocultar descrição" : "Ver descrição";
+      sincronizarAlturaColunas();
     });
 
     div.appendChild(rotulo);
@@ -542,18 +706,19 @@ function criarCard(card, coluna) {
   const botaoEditar = document.createElement("button");
   botaoEditar.type = "button";
   botaoEditar.className = "botao-card";
-  botaoEditar.textContent = "✏️ Editar";
+  botaoEditar.innerHTML = '<span data-icone="editar" data-tamanho="12"></span> Editar';
   botaoEditar.addEventListener("click", () => abrirEdicaoCard(card));
   rodape.appendChild(botaoEditar);
 
   const botaoAcessar = document.createElement("button");
   botaoAcessar.type = "button";
   botaoAcessar.className = "botao-card botao-card-primario";
-  botaoAcessar.textContent = "💬 Acessar";
+  botaoAcessar.innerHTML = '<span data-icone="acessar" data-tamanho="12"></span> Acessar';
   botaoAcessar.addEventListener("click", () => acessarConversa(card));
   rodape.appendChild(botaoAcessar);
 
   div.appendChild(rodape);
+  substituirIcones(div);
 
   // Botão de programar (só em coluna funcionária)
   if (coluna.tipo === "funcionaria") {
@@ -563,9 +728,9 @@ function criarCard(card, coluna) {
     const jaProgramado = card.programacao && card.programacao.status !== "enviado";
     if (jaProgramado) {
       botaoProgramar.classList.add("programado");
-      botaoProgramar.textContent = "⏳ Aguardando envio";
+      botaoProgramar.innerHTML = '<span data-icone="relogio" data-tamanho="12"></span> Aguardando envio';
     } else {
-      botaoProgramar.textContent = "📅 Programar mensagem";
+      botaoProgramar.innerHTML = '<span data-icone="calendario" data-tamanho="12"></span> Programar mensagem';
     }
     botaoProgramar.addEventListener("click", () => abrirProgramacao(card, coluna));
     div.appendChild(botaoProgramar);
@@ -578,6 +743,7 @@ function criarCard(card, coluna) {
 
   div.addEventListener("dragstart", (evento) => {
     cardArrastado = card.id;
+    colunaArrastada = coluna.id;
     evento.dataTransfer.effectAllowed = "move";
     evento.dataTransfer.setData("text/plain", card.id);
 
@@ -623,11 +789,11 @@ function criarCard(card, coluna) {
       cardFlutuante = null;
     }
     cardArrastado = null;
-    document.querySelectorAll(".coluna").forEach((c) =>
-      c.classList.remove("arrastando-sobre")
-    );
+    colunaArrastada = null;
+    limparDestaquesArrastoCard();
   });
 
+  substituirIcones(div);
   return div;
 }
 
@@ -639,32 +805,302 @@ function criarLinhaInfo(rotulo, valor) {
 }
 
 // ------------------------------------------------------------
-// BUSCA EM TEMPO REAL
+// COLUNA FANTASMA
+// Aparece durante o arrasto de um card sobre a faixa horizontal
+// de qualquer coluna (inclusive no espaço vazio abaixo de colunas
+// curtas). Reaproveita um único elemento .coluna-fantasma no DOM.
+// ------------------------------------------------------------
+
+let colunaFantasma = null;
+let colunaFantasmaAtual = null;
+
+function obterCorDaColuna(colunaEl) {
+  if (!colunaEl) return "lilas";
+  return colunaEl.dataset.cor || "lilas";
+}
+
+function destacarColunaAlvo(colunaEl) {
+  document.querySelectorAll(".coluna.arrastando-sobre").forEach((c) => {
+    if (c !== colunaEl) c.classList.remove("arrastando-sobre");
+  });
+  if (colunaEl) colunaEl.classList.add("arrastando-sobre");
+}
+
+function limparDestaquesArrastoCard() {
+  esconderColunaFantasma();
+  document.querySelectorAll(".coluna").forEach((c) =>
+    c.classList.remove("arrastando-sobre")
+  );
+}
+
+function obterColunaNaFaixaHorizontal(clientX) {
+  const colunas = Array.from(kanban.querySelectorAll(".coluna"));
+  for (const col of colunas) {
+    const rect = col.getBoundingClientRect();
+    if (clientX >= rect.left && clientX <= rect.right) {
+      return col;
+    }
+  }
+  return null;
+}
+
+function mostrarColunaFantasma(colunaEl, clientY) {
+  if (!cardArrastado || !colunaEl) return;
+  if (colunaEl.dataset.colunaId === colunaArrastada) {
+    esconderColunaFantasma();
+    return;
+  }
+
+  const corpo = colunaEl.querySelector(".corpo-coluna");
+  const temCards = corpo ? !!corpo.querySelector(".card-conversa") : false;
+  const kanbanRect = kanban.getBoundingClientRect();
+  const corpoRect = corpo ? corpo.getBoundingClientRect() : colunaEl.getBoundingClientRect();
+  const cabecalho = colunaEl.querySelector(".cabecalho-coluna");
+  const cabRect = cabecalho ? cabecalho.getBoundingClientRect() : colunaEl.getBoundingClientRect();
+  const margemVertical = 12;
+
+  // O topo de referência NUNCA pode ficar acima da base do cabeçalho (.cabecalho-coluna).
+  // Se houver rolagem vertical ou se apenas o topo da coluna aparecer, a fantasma
+  // começará sempre estritamente abaixo do cabeçalho.
+  const topoMinimo = cabRect ? cabRect.bottom : colunaEl.getBoundingClientRect().top;
+  const topoReferencia = temCards ? Math.max(topoMinimo, corpoRect.bottom) : topoMinimo;
+
+  // Se o cursor estiver sobre o cabeçalho ou sobre os cards, não exibimos a fantasma
+  if (typeof clientY === "number" && clientY <= topoReferencia) {
+    esconderColunaFantasma();
+    return;
+  }
+
+  const topo = Math.max(topoReferencia, kanbanRect.top) + margemVertical;
+  const base = kanbanRect.bottom - margemVertical;
+  const altura = base - topo;
+
+  if (altura < 30) {
+    esconderColunaFantasma();
+    return;
+  }
+
+  if (!colunaFantasma) {
+    colunaFantasma = document.createElement("div");
+    colunaFantasma.className = "coluna-fantasma";
+  }
+
+  if (!colunaFantasma.parentElement) {
+    document.body.appendChild(colunaFantasma);
+  }
+
+  colunaFantasma.dataset.cor = obterCorDaColuna(colunaEl);
+  colunaFantasmaAtual = colunaEl;
+  atualizarPosicaoFantasma(colunaEl);
+}
+
+function atualizarPosicaoFantasma(colunaEl) {
+  if (!colunaFantasma || !colunaEl) return;
+
+  const colRect = colunaEl.getBoundingClientRect();
+  const cabecalho = colunaEl.querySelector(".cabecalho-coluna");
+  const corpo = colunaEl.querySelector(".corpo-coluna");
+  const kanbanRect = kanban.getBoundingClientRect();
+
+  const cabRect = cabecalho ? cabecalho.getBoundingClientRect() : colRect;
+  const corpoRect = corpo ? corpo.getBoundingClientRect() : colRect;
+  const temCards = corpo ? !!corpo.querySelector(".card-conversa") : false;
+
+  // Espaço de respiro para não colar nos elementos em tela:
+  // 10px nos lados e 12px no topo e na parte inferior
+  const margemHorizontal = 10;
+  const margemVertical = 12;
+
+  const esquerda = Math.max(colRect.left, kanbanRect.left) + margemHorizontal;
+  const direita = Math.min(colRect.right, kanbanRect.right) - margemHorizontal;
+  const largura = Math.max(0, direita - esquerda);
+
+  // A área fantasma inicia abaixo dos cards (se visíveis) ou estritamente abaixo do cabeçalho
+  const topoMinimo = cabRect ? cabRect.bottom : colRect.top;
+  const topoReferencia = temCards ? Math.max(topoMinimo, corpoRect.bottom) : topoMinimo;
+  const topo = Math.max(topoReferencia, kanbanRect.top) + margemVertical;
+  const base = kanbanRect.bottom - margemVertical;
+  const altura = base - topo;
+
+  if (altura < 30) {
+    esconderColunaFantasma();
+    return;
+  }
+
+  colunaFantasma.style.left = esquerda + "px";
+  colunaFantasma.style.top = topo + "px";
+  colunaFantasma.style.width = largura + "px";
+  colunaFantasma.style.height = altura + "px";
+}
+
+function esconderColunaFantasma() {
+  if (colunaFantasma && colunaFantasma.parentElement) {
+    colunaFantasma.remove();
+  }
+  colunaFantasmaAtual = null;
+}
+
+kanban.addEventListener("dragover", (evento) => {
+  if (!cardArrastado) return;
+  const col = obterColunaNaFaixaHorizontal(evento.clientX);
+  if (col && col.dataset.colunaId !== colunaArrastada) {
+    evento.preventDefault();
+    evento.dataTransfer.dropEffect = "move";
+    destacarColunaAlvo(col);
+    mostrarColunaFantasma(col, evento.clientY);
+  } else {
+    limparDestaquesArrastoCard();
+  }
+});
+
+kanban.addEventListener("dragleave", (evento) => {
+  if (kanban.contains(evento.relatedTarget)) return;
+  limparDestaquesArrastoCard();
+});
+
+kanban.addEventListener("drop", async (evento) => {
+  if (!cardArrastado) return;
+  const col = obterColunaNaFaixaHorizontal(evento.clientX) || colunaFantasmaAtual;
+  if (!col) return;
+  evento.preventDefault();
+  const idCard = cardArrastado;
+  const idOrigem = colunaArrastada;
+  cardArrastado = null;
+  colunaArrastada = null;
+  limparDestaquesArrastoCard();
+  if (col.dataset.colunaId && col.dataset.colunaId !== idOrigem) {
+    await moverCard(idCard, col.dataset.colunaId);
+  }
+});
+
+kanban.addEventListener("scroll", () => {
+  if (cardArrastado && colunaFantasmaAtual) {
+    atualizarPosicaoFantasma(colunaFantasmaAtual);
+  }
+  atualizarArredondamentoCabecalhos();
+});
+
+document.addEventListener("keydown", (evento) => {
+  if (evento.key === "Escape" && cardArrastado) {
+    cardArrastado = null;
+    colunaArrastada = null;
+    limparDestaquesArrastoCard();
+  }
+});
+
+// ------------------------------------------------------------
+// BUSCA E FILTROS EM TEMPO REAL
 // ------------------------------------------------------------
 buscaCard.addEventListener("input", () => {
   termoBusca = buscaCard.value.trim();
   renderizarKanban();
 });
 
+const filtroPrioridade = document.getElementById("filtro-prioridade");
+const wrapperFiltroPrioridade = document.getElementById("wrapper-filtro-prioridade");
+const botaoFiltroPrioridade = document.getElementById("botao-filtro-prioridade");
+const dropdownFiltroPrioridade = document.getElementById("dropdown-filtro-prioridade");
+const textoFiltroPrioridade = document.getElementById("texto-filtro-prioridade");
+
+function fecharDropdownPrioridade() {
+  if (!dropdownFiltroPrioridade) return;
+  dropdownFiltroPrioridade.style.display = "none";
+  if (botaoFiltroPrioridade) {
+    botaoFiltroPrioridade.classList.remove("aberto");
+    botaoFiltroPrioridade.setAttribute("aria-expanded", "false");
+  }
+}
+
+function abrirDropdownPrioridade() {
+  if (!dropdownFiltroPrioridade || !botaoFiltroPrioridade) return;
+  dropdownFiltroPrioridade.style.display = "block";
+  botaoFiltroPrioridade.classList.add("aberto");
+  botaoFiltroPrioridade.setAttribute("aria-expanded", "true");
+  substituirIcones(dropdownFiltroPrioridade);
+}
+
+function alternarDropdownPrioridade(evento) {
+  if (evento) evento.stopPropagation();
+  if (!dropdownFiltroPrioridade) return;
+  const estaAberto = dropdownFiltroPrioridade.style.display !== "none";
+  if (estaAberto) {
+    fecharDropdownPrioridade();
+  } else {
+    if (menuKanban) menuKanban.classList.remove("aberta");
+    if (menuPerfil) menuPerfil.classList.remove("aberta");
+    fecharMenuOpcoes();
+    abrirDropdownPrioridade();
+  }
+}
+
+function selecionarPrioridadeFiltro(valor) {
+  filtroPrioridadeSelecionada = (valor || "").trim();
+  if (filtroPrioridade) {
+    filtroPrioridade.value = filtroPrioridadeSelecionada;
+  }
+
+  // Atualizar visual do botão gatilho
+  if (botaoFiltroPrioridade) {
+    botaoFiltroPrioridade.classList.remove("ativo-alta", "ativo-media", "ativo-baixa");
+    if (filtroPrioridadeSelecionada === "alta") {
+      botaoFiltroPrioridade.classList.add("ativo-alta");
+      if (textoFiltroPrioridade) textoFiltroPrioridade.textContent = "Alta";
+    } else if (filtroPrioridadeSelecionada === "media") {
+      botaoFiltroPrioridade.classList.add("ativo-media");
+      if (textoFiltroPrioridade) textoFiltroPrioridade.textContent = "Média";
+    } else if (filtroPrioridadeSelecionada === "baixa") {
+      botaoFiltroPrioridade.classList.add("ativo-baixa");
+      if (textoFiltroPrioridade) textoFiltroPrioridade.textContent = "Baixa";
+    } else {
+      if (textoFiltroPrioridade) textoFiltroPrioridade.textContent = "Prioridade";
+    }
+  }
+
+  // Atualizar seleção no dropdown
+  if (dropdownFiltroPrioridade) {
+    dropdownFiltroPrioridade.querySelectorAll(".item-prioridade-drop").forEach((btn) => {
+      const at = (btn.dataset.valor || "") === filtroPrioridadeSelecionada;
+      btn.classList.toggle("ativo", at);
+    });
+  }
+
+  fecharDropdownPrioridade();
+  renderizarKanban();
+}
+
+if (botaoFiltroPrioridade) {
+  botaoFiltroPrioridade.addEventListener("click", alternarDropdownPrioridade);
+}
+
+if (dropdownFiltroPrioridade) {
+  dropdownFiltroPrioridade.querySelectorAll(".item-prioridade-drop").forEach((btn) => {
+    btn.addEventListener("click", (evento) => {
+      evento.stopPropagation();
+      selecionarPrioridadeFiltro(btn.dataset.valor || "");
+    });
+  });
+}
+
+if (filtroPrioridade) {
+  filtroPrioridade.addEventListener("change", () => {
+    selecionarPrioridadeFiltro(filtroPrioridade.value.trim());
+  });
+}
+
 // ------------------------------------------------------------
 // MENUS FLUTUANTES
 // ------------------------------------------------------------
-botaoPerfil.addEventListener("click", () => {
-  menuKanban.classList.remove("aberta");
-  menuPerfil.classList.toggle("aberta");
-});
-
 botaoMenuKanban.addEventListener("click", () => {
-  menuPerfil.classList.remove("aberta");
+  fecharDropdownPrioridade();
   menuKanban.classList.toggle("aberta");
 });
 
 document.addEventListener("click", (evento) => {
-  if (!menuPerfil.contains(evento.target) && !botaoPerfil.contains(evento.target)) {
-    menuPerfil.classList.remove("aberta");
-  }
   if (!menuKanban.contains(evento.target) && !botaoMenuKanban.contains(evento.target)) {
     menuKanban.classList.remove("aberta");
+  }
+  if (wrapperFiltroPrioridade && !wrapperFiltroPrioridade.contains(evento.target)) {
+    fecharDropdownPrioridade();
   }
   const menuOpcoes = document.getElementById("menu-opcoes");
   if (menuOpcoes &&
@@ -676,13 +1112,7 @@ document.addEventListener("click", (evento) => {
 
 botaoNovaColuna.addEventListener("click", abrirCriacaoColuna);
 
-const botaoRecolherSidebar = document.getElementById("botao-recolher-sidebar");
 
-if (botaoRecolherSidebar) {
-  botaoRecolherSidebar.addEventListener("click", () => {
-    document.body.classList.toggle("sidebar-recolhida");
-  });
-}
 
 // ------------------------------------------------------------
 // SAIR
@@ -902,35 +1332,59 @@ function abrirMenuColuna(botao, coluna) {
   menu.className = "menu-opcoes";
 
   const opcoes = [
-    { texto: "✏️ Editar nome/descrição", acao: () => abrirEdicaoColuna(coluna) },
-    { texto: "📜 Ver histórico", acao: () => abrirHistoricoColuna(coluna) }
+    { icone: "editar", texto: "Editar nome/descrição", acao: () => abrirEdicaoColuna(coluna) },
+    { icone: "ordenar", texto: "Ordenar", acao: () => abrirMenuOrdenacaoColuna(botao, coluna) },
+    { icone: "historico", texto: "Ver histórico", acao: () => abrirHistoricoColuna(coluna) }
   ];
 
   if (coluna.tipo === "funcionaria") {
     opcoes.push({
-      texto: "⚙️ Configurar função",
+      icone: "config",
+      texto: "Configurar função",
       acao: () => abrirConfiguracaoFuncionaria(coluna)
     });
   }
 
+  // Divisor antes da exclusão
+  opcoes.push({ divisor: true });
+
   if (ehAdmin) {
     opcoes.push({
-      texto: "🗑️ Excluir coluna",
+      icone: "lixeira",
+      texto: "Excluir coluna",
       acao: () => excluirColuna(coluna),
       classe: "opcao-perigosa"
     });
   } else {
     opcoes.push({
-      texto: "📨 Solicitar exclusão",
+      icone: "saida",
+      texto: "Solicitar exclusão",
       acao: () => solicitarExclusaoColuna(coluna)
     });
   }
 
   opcoes.forEach((opcao) => {
+    if (opcao.divisor) {
+      const divisor = document.createElement("div");
+      divisor.className = "divisor-menu-opcoes";
+      menu.appendChild(divisor);
+      return;
+    }
+
     const item = document.createElement("button");
     item.type = "button";
-    item.textContent = opcao.texto;
     item.className = "item-opcao" + (opcao.classe ? " " + opcao.classe : "");
+
+    const spanIcone = document.createElement("span");
+    spanIcone.dataset.icone = opcao.icone || "tres_pontos";
+    spanIcone.dataset.tamanho = "13";
+    item.appendChild(spanIcone);
+
+    const spanTexto = document.createElement("span");
+    spanTexto.className = "texto-opcao";
+    spanTexto.textContent = opcao.texto;
+    item.appendChild(spanTexto);
+
     item.addEventListener("click", () => {
       fecharMenuOpcoes();
       opcao.acao();
@@ -938,9 +1392,133 @@ function abrirMenuColuna(botao, coluna) {
     menu.appendChild(item);
   });
 
+  substituirIcones(menu);
   document.body.appendChild(menu);
   const rect = botao.getBoundingClientRect();
-  const larguraMenu = 210;
+  const larguraMenu = 200;
+  let esquerda = rect.right - larguraMenu;
+  if (esquerda < 8) esquerda = 8;
+  if (esquerda + larguraMenu > window.innerWidth - 8) {
+    esquerda = window.innerWidth - larguraMenu - 8;
+  }
+  menu.style.top = (rect.bottom + 4) + "px";
+  menu.style.left = esquerda + "px";
+}
+
+// ------------------------------------------------------------
+// MENU DE ORDENAÇÃO DA COLUNA
+// ------------------------------------------------------------
+function abrirMenuOrdenacaoColuna(botao, coluna) {
+  fecharMenuOpcoes();
+  const menu = document.createElement("div");
+  menu.id = "menu-opcoes";
+  menu.className = "menu-opcoes menu-opcoes-ordenar";
+
+  const cabecalhoVoltar = document.createElement("button");
+  cabecalhoVoltar.type = "button";
+  cabecalhoVoltar.className = "item-opcao item-opcao-voltar";
+  cabecalhoVoltar.innerHTML = '<span data-icone="recolher" data-tamanho="13"></span> <span class="texto-opcao"><strong>Ordenar</strong></span>';
+  cabecalhoVoltar.addEventListener("click", () => {
+    fecharMenuOpcoes();
+    abrirMenuColuna(botao, coluna);
+  });
+  menu.appendChild(cabecalhoVoltar);
+
+  const divisor = document.createElement("div");
+  divisor.className = "divisor-menu-opcoes";
+  menu.appendChild(divisor);
+
+  const atual = ordenacaoColunas[coluna.id] || "padrao";
+
+  const opcoes = [
+    {
+      modo: "prioridade",
+      icone: "bandeira",
+      texto: "Por prioridade",
+      desc: "Alta → Média → Sem marcação → Baixa"
+    },
+    {
+      modo: "nome",
+      icone: "editar",
+      texto: "Por nome",
+      desc: "Ordem alfabética (A → Z)"
+    },
+    {
+      modo: "tempo",
+      icone: "relogio",
+      texto: "Por tempo",
+      desc: "Mais antigo → Mais novo"
+    },
+    {
+      modo: "padrao",
+      icone: "resetar",
+      texto: "Padrão",
+      desc: "Mais recente primeiro"
+    }
+  ];
+
+  opcoes.forEach((op) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "item-opcao item-opcao-ordenar" + (atual === op.modo ? " item-opcao-ativo" : "");
+
+    const spanIcone = document.createElement("span");
+    spanIcone.dataset.icone = op.icone;
+    spanIcone.dataset.tamanho = "13";
+    item.appendChild(spanIcone);
+
+    const corpoTexto = document.createElement("div");
+    corpoTexto.className = "corpo-texto-ordenar";
+
+    const spanTexto = document.createElement("span");
+    spanTexto.className = "texto-opcao";
+    spanTexto.textContent = op.texto;
+    corpoTexto.appendChild(spanTexto);
+
+    if (op.desc) {
+      const spanDesc = document.createElement("span");
+      spanDesc.className = "subtexto-ordenar";
+      spanDesc.textContent = op.desc;
+      corpoTexto.appendChild(spanDesc);
+    }
+
+    item.appendChild(corpoTexto);
+
+    if (atual === op.modo) {
+      const checkAtivo = document.createElement("span");
+      checkAtivo.dataset.icone = "check";
+      checkAtivo.dataset.tamanho = "12";
+      checkAtivo.className = "check-ativo";
+      item.appendChild(checkAtivo);
+    }
+
+    item.addEventListener("click", () => {
+      fecharMenuOpcoes();
+      ordenacaoColunas[coluna.id] = op.modo;
+      try {
+        localStorage.setItem("golden_ordenacao_colunas", JSON.stringify(ordenacaoColunas));
+      } catch (e) {}
+
+      if (op.modo === "prioridade") {
+        mostrarMensagem("Coluna ordenada por prioridade (Alta → Baixa).", "sucesso");
+      } else if (op.modo === "nome") {
+        mostrarMensagem("Coluna ordenada por nome (A → Z).", "sucesso");
+      } else if (op.modo === "tempo") {
+        mostrarMensagem("Coluna ordenada por tempo (Mais antigo primeiro).", "sucesso");
+      } else {
+        mostrarMensagem("Ordenação restaurada para o padrão.", "sucesso");
+      }
+
+      renderizarKanban();
+    });
+
+    menu.appendChild(item);
+  });
+
+  substituirIcones(menu);
+  document.body.appendChild(menu);
+  const rect = botao.getBoundingClientRect();
+  const larguraMenu = 240;
   let esquerda = rect.right - larguraMenu;
   if (esquerda < 8) esquerda = 8;
   if (esquerda + larguraMenu > window.innerWidth - 8) {
@@ -960,7 +1538,11 @@ function abrirMenuCard(botao, card, coluna) {
   menu.className = "menu-opcoes";
 
   const opcoes = [
-    { texto: "📜 Histórico", acao: () => abrirHistoricoCard(card) }
+    {
+      icone: "historico",
+      texto: "Histórico",
+      acao: () => abrirHistoricoCard(card)
+    }
   ];
 
   const colunaDoCard = cacheColunas.find((c) => c.id === card.colunaId);
@@ -968,47 +1550,156 @@ function abrirMenuCard(botao, card, coluna) {
 
   if (ehColunaFuncionaria) {
     opcoes.push({
-      texto: "✅ Concluir mensagem da coluna",
+      icone: "check",
+      texto: "Concluir mensagem da coluna",
       acao: () => concluirMensagemColuna(card, colunaDoCard)
     });
   }
 
   if (card.programacao && card.programacao.status === "aguardando_envio") {
     opcoes.push({
-      texto: "📨 Marcar mensagem do card como enviada",
+      icone: "check",
+      texto: "Marcar mensagem como enviada",
       acao: () => concluirMensagemCard(card)
     });
   }
 
+  // Divisor para prioridades
+  opcoes.push({ divisor: true });
+
+  const pAtual = (card.prioridade || "").toLowerCase();
+  opcoes.push({
+    blocoPrioridades: true,
+    prioridadeAtual: pAtual,
+    card: card
+  });
+
+  // Divisor para status
+  opcoes.push({ divisor: true });
+
   opcoes.push(
     {
-      texto: "🔴 Marcar como perdida",
+      icone: "x",
+      iconeClasse: "icone-perigo",
+      texto: "Marcar como perdida",
       acao: () => marcarCard(card, "perdida")
     },
     {
-      texto: "🟢 Marcar como finalizada",
+      icone: "check",
+      iconeClasse: "icone-sucesso",
+      texto: "Marcar como finalizada",
       acao: () => marcarCard(card, "finalizada")
     }
   );
 
-  if (card.status === "perdida" || card.status === "finalizada") {
+  const temMarcacaoStatus = card.status === "perdida" || card.status === "finalizada";
+  const temPrioridade = Boolean(card.prioridade);
+
+  if (temMarcacaoStatus || temPrioridade) {
     opcoes.push({
-      texto: "↩️ Desfazer marcação",
+      icone: "resetar",
+      texto: "Desfazer marcação",
       acao: () => desfazerMarcacao(card)
     });
   }
 
+  // Divisor para exclusão
+  opcoes.push({ divisor: true });
+
   opcoes.push({
-    texto: "🗑️ Excluir card",
+    icone: "lixeira",
+    texto: "Excluir card",
     acao: () => excluirCard(card),
     classe: "opcao-perigosa"
   });
 
   opcoes.forEach((opcao) => {
+    if (opcao.divisor) {
+      const divisor = document.createElement("div");
+      divisor.className = "divisor-menu-opcoes";
+      menu.appendChild(divisor);
+      return;
+    }
+
+    if (opcao.blocoPrioridades) {
+      const bloco = document.createElement("div");
+      bloco.className = "bloco-menu-prioridades";
+
+      const rotulo = document.createElement("div");
+      rotulo.className = "rotulo-secao-prioridades";
+      rotulo.innerHTML = '<span data-icone="bandeira" data-tamanho="11"></span> Prioridade';
+      bloco.appendChild(rotulo);
+
+      const linhaPills = document.createElement("div");
+      linhaPills.className = "linha-pills-prioridade";
+
+      const niveis = [
+        { chave: "alta", rotulo: "Alta", classe: "pill-alta", ponto: "ponto-alta" },
+        { chave: "media", rotulo: "Média", classe: "pill-media", ponto: "ponto-media" },
+        { chave: "baixa", rotulo: "Baixa", classe: "pill-baixa", ponto: "ponto-baixa" }
+      ];
+
+      niveis.forEach((nv) => {
+        const btnPill = document.createElement("button");
+        btnPill.type = "button";
+        const estaAtiva = opcao.prioridadeAtual === nv.chave;
+        btnPill.className = "pill-prioridade " + nv.classe + (estaAtiva ? " ativa" : "");
+        btnPill.title = estaAtiva ? "Remover prioridade " + nv.rotulo : "Definir prioridade " + nv.rotulo;
+
+        const ponto = document.createElement("span");
+        ponto.className = "ponto-prioridade-cozy " + nv.ponto;
+        btnPill.appendChild(ponto);
+
+        const texto = document.createElement("span");
+        texto.textContent = nv.rotulo;
+        btnPill.appendChild(texto);
+
+        if (estaAtiva) {
+          const check = document.createElement("span");
+          check.dataset.icone = "check";
+          check.dataset.tamanho = "10";
+          check.className = "check-pill";
+          btnPill.appendChild(check);
+        }
+
+        btnPill.addEventListener("click", (e) => {
+          e.stopPropagation();
+          fecharMenuOpcoes();
+          marcarPrioridadeCard(opcao.card, nv.chave);
+        });
+
+        linhaPills.appendChild(btnPill);
+      });
+
+      bloco.appendChild(linhaPills);
+      menu.appendChild(bloco);
+      return;
+    }
+
     const item = document.createElement("button");
     item.type = "button";
-    item.textContent = opcao.texto;
     item.className = "item-opcao" + (opcao.classe ? " " + opcao.classe : "");
+
+    const spanIcone = document.createElement("span");
+    spanIcone.dataset.icone = opcao.icone || "tres_pontos";
+    spanIcone.dataset.tamanho = "13";
+    if (opcao.iconeClasse) spanIcone.className = opcao.iconeClasse;
+    item.appendChild(spanIcone);
+
+    const spanTexto = document.createElement("span");
+    spanTexto.className = "texto-opcao";
+    spanTexto.textContent = opcao.texto;
+    item.appendChild(spanTexto);
+
+    if (opcao.ativo) {
+      item.classList.add("item-opcao-ativo");
+      const checkAtivo = document.createElement("span");
+      checkAtivo.dataset.icone = "check";
+      checkAtivo.dataset.tamanho = "12";
+      checkAtivo.className = "check-ativo";
+      item.appendChild(checkAtivo);
+    }
+
     item.addEventListener("click", () => {
       fecharMenuOpcoes();
       opcao.acao();
@@ -1016,9 +1707,11 @@ function abrirMenuCard(botao, card, coluna) {
     menu.appendChild(item);
   });
 
+  substituirIcones(menu);
   document.body.appendChild(menu);
+
   const rect = botao.getBoundingClientRect();
-  const larguraMenu = 210;
+  const larguraMenu = 200;
   let esquerda = rect.right - larguraMenu;
   if (esquerda < 8) esquerda = 8;
   if (esquerda + larguraMenu > window.innerWidth - 8) {
@@ -1026,6 +1719,26 @@ function abrirMenuCard(botao, card, coluna) {
   }
   menu.style.top = (rect.bottom + 4) + "px";
   menu.style.left = esquerda + "px";
+}
+
+async function marcarPrioridadeCard(card, prioridade) {
+  const pAtual = (card.prioridade || "").toLowerCase();
+  const novaPrioridade = pAtual === prioridade ? "" : prioridade;
+  try {
+    await updateDoc(doc(db, "cards", card.id), {
+      prioridade: novaPrioridade,
+      ultimaAtividade: serverTimestamp()
+    });
+    card.prioridade = novaPrioridade;
+    if (novaPrioridade) {
+      const rotulo = novaPrioridade.charAt(0).toUpperCase() + novaPrioridade.slice(1);
+      mostrarMensagem("Prioridade " + rotulo + " definida.", "sucesso");
+    } else {
+      mostrarMensagem("Prioridade removida.", "sucesso");
+    }
+  } catch (erro) {
+    mostrarMensagem("Erro ao atualizar prioridade do card.", "erro");
+  }
 }
 
 // ------------------------------------------------------------
@@ -1534,6 +2247,13 @@ function abrirEdicaoCard(card) {
     "<label>Razão social</label><input type='text' id='e-razao'>" +
     "<label>Telefone</label><input type='text' id='e-tel'>" +
     "<label>E-mail</label><input type='text' id='e-email'>" +
+    "<label>Prioridade</label>" +
+    "<select id='e-prioridade'>" +
+      "<option value=''>Nenhuma</option>" +
+      "<option value='alta'>Alta</option>" +
+      "<option value='media'>Média</option>" +
+      "<option value='baixa'>Baixa</option>" +
+    "</select>" +
     "<label>Valor negociado (R$)</label><input type='number' id='e-valor' step='0.01'>" +
     "<label>Descrição</label><textarea id='e-desc'></textarea>";
 
@@ -1541,6 +2261,7 @@ function abrirEdicaoCard(card) {
   caixa.querySelector("#e-razao").value = card.razaoSocial || "";
   caixa.querySelector("#e-tel").value = card.telefone || "";
   caixa.querySelector("#e-email").value = card.email || "";
+  caixa.querySelector("#e-prioridade").value = (card.prioridade || "").toLowerCase();
   caixa.querySelector("#e-valor").value = card.valorNegociado || 0;
   caixa.querySelector("#e-desc").value = card.descricao || "";
 
@@ -1558,6 +2279,7 @@ function abrirEdicaoCard(card) {
       razaoSocial: caixa.querySelector("#e-razao").value.trim(),
       telefone: caixa.querySelector("#e-tel").value.trim(),
       email: caixa.querySelector("#e-email").value.trim(),
+      prioridade: caixa.querySelector("#e-prioridade").value.trim(),
       valorNegociado: parseFloat(caixa.querySelector("#e-valor").value) || 0,
       descricao: caixa.querySelector("#e-desc").value.trim()
     };
@@ -1567,6 +2289,7 @@ function abrirEdicaoCard(card) {
     if (novos.razaoSocial !== (card.razaoSocial || "")) mudancas.push("Razão social");
     if (novos.telefone !== (card.telefone || "")) mudancas.push("Telefone");
     if (novos.email !== (card.email || "")) mudancas.push("E-mail");
+    if (novos.prioridade !== ((card.prioridade || "").toLowerCase())) mudancas.push("Prioridade");
     if (novos.valorNegociado !== (card.valorNegociado || 0)) mudancas.push("Valor");
     if (novos.descricao !== (card.descricao || "")) mudancas.push("Descrição");
 
@@ -1643,13 +2366,25 @@ async function marcarCard(card, status) {
 async function desfazerMarcacao(card) {
   if (!window.confirm("Desfazer a marcação deste card?")) return;
   try {
-    await updateDoc(doc(db, "cards", card.id), {
-      status: "ativa",
+    const dados = {
       ultimaAtividade: serverTimestamp()
-    });
-    await registrarHistoricoCard(card.id, "marcacao", {
-      status: "ativa (marcação desfeita)"
-    });
+    };
+    const detalhesHistorico = {};
+
+    if (card.status === "perdida" || card.status === "finalizada") {
+      dados.status = "ativa";
+      detalhesHistorico.status = "ativa (marcação desfeita)";
+      card.status = "ativa";
+    }
+
+    if (card.prioridade) {
+      dados.prioridade = "";
+      detalhesHistorico.prioridade = "removida";
+      card.prioridade = "";
+    }
+
+    await updateDoc(doc(db, "cards", card.id), dados);
+    await registrarHistoricoCard(card.id, "marcacao", detalhesHistorico);
     mostrarMensagem("Marcação desfeita.", "sucesso");
   } catch (erro) {
     mostrarMensagem("Erro ao desfazer a marcação.", "erro");
@@ -1760,13 +2495,654 @@ function abrirProgramacao(card, coluna) {
 }
 
 // ------------------------------------------------------------
+// AUXILIARES DE BUSCA E FILTROS DO HISTÓRICO
+// ------------------------------------------------------------
+function normalizarTexto(texto) {
+  return String(texto || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function encontrarCardHistorico(cardId) {
+  if (!cardId) return null;
+  return cacheCards.find((c) => c.id === cardId) ||
+         cacheCardsExcluidos.find((c) => c.id === cardId) ||
+         null;
+}
+
+function eventoCorrespondeFiltros(ev, filtros) {
+  const evSec = segundosDe(ev.timestamp);
+  if (filtros.inicioSec !== null && evSec < filtros.inicioSec) return false;
+  if (filtros.fimSec !== null && evSec > filtros.fimSec) return false;
+
+  if (!filtros.termo) return true;
+
+  const termoNormalizado = normalizarTexto(filtros.termo);
+  const termoDigitos = filtros.termo.replace(/\D/g, "");
+
+  const partes = [];
+
+  // Nome da coluna ou card
+  if (ev._nome) partes.push(ev._nome);
+  if (ev.colunaOrigemId) {
+    const cOri = cacheColunas.find((c) => c.id === ev.colunaOrigemId);
+    if (cOri) partes.push(cOri.nome);
+  }
+  if (ev.colunaDestinoId) {
+    const cDest = cacheColunas.find((c) => c.id === ev.colunaDestinoId);
+    if (cDest) partes.push(cDest.nome);
+  }
+
+  // Card resumo e objeto do card
+  if (ev.cardResumo) partes.push(ev.cardResumo);
+  if (ev._card) {
+    if (ev._card.nomeConta) partes.push(ev._card.nomeConta);
+    if (ev._card.telefone) {
+      partes.push(ev._card.telefone);
+      partes.push(ev._card.telefone.replace(/\D/g, ""));
+    }
+    if (ev._card.email) partes.push(ev._card.email);
+    if (ev._card.razaoSocial) partes.push(ev._card.razaoSocial);
+  }
+
+  // Colaborador da plataforma
+  if (ev.autor) {
+    if (ev.autor.nome) partes.push(ev.autor.nome);
+    if (ev.autor.email) partes.push(ev.autor.email);
+  }
+  if (ev.diretrizDe) {
+    if (ev.diretrizDe.nome) partes.push(ev.diretrizDe.nome);
+    if (ev.diretrizDe.email) partes.push(ev.diretrizDe.email);
+  }
+
+  // Tipo e detalhes
+  if (ev.tipo) partes.push(ev.tipo);
+  if (ev.detalhes) {
+    if (ev.detalhes.de) partes.push(ev.detalhes.de);
+    if (ev.detalhes.para) partes.push(ev.detalhes.para);
+    if (ev.detalhes.campos) partes.push(ev.detalhes.campos);
+    if (ev.detalhes.status) partes.push(ev.detalhes.status);
+    if (ev.detalhes.dataHora) partes.push(ev.detalhes.dataHora);
+    if (ev.detalhes.ordem) partes.push(ev.detalhes.ordem);
+  }
+
+  const textoCompleto = normalizarTexto(partes.join(" "));
+  if (textoCompleto.includes(termoNormalizado)) return true;
+
+  if (termoDigitos.length >= 3) {
+    const fone = (ev._card?.telefone || "").replace(/\D/g, "");
+    if (fone.includes(termoDigitos)) return true;
+  }
+
+  return false;
+}
+
+// ------------------------------------------------------------
+// CALENDÁRIO FOFO E AMIGÁVEL — POPUP FLUTUANTE
+// ------------------------------------------------------------
+let calendarioFofoAberto = null;
+
+function fecharCalendarioFofo() {
+  if (calendarioFofoAberto) {
+    calendarioFofoAberto.remove();
+    calendarioFofoAberto = null;
+    document.removeEventListener("pointerdown", fecharCalendarioFofoAoClicarFora);
+    document.removeEventListener("keydown", fecharCalendarioFofoTeclado);
+  }
+}
+
+function fecharCalendarioFofoAoClicarFora(e) {
+  if (!calendarioFofoAberto) return;
+  if (!calendarioFofoAberto.contains(e.target) && !e.target.closest(".gatilho-data-fofo")) {
+    fecharCalendarioFofo();
+  }
+}
+
+function fecharCalendarioFofoTeclado(e) {
+  if (e.key === "Escape") {
+    fecharCalendarioFofo();
+  }
+}
+
+function abrirCalendarioFofo(botaoAncora, dataInicial, aoConfirmar) {
+  fecharCalendarioFofo();
+
+  const popup = document.createElement("div");
+  popup.className = "calendario-fofo-popup";
+  calendarioFofoAberto = popup;
+
+  const dataBase = dataInicial ? new Date(dataInicial) : new Date();
+  let anoVisual = dataBase.getFullYear();
+  let mesVisual = dataBase.getMonth();
+
+  let diaSel = dataInicial ? dataInicial.getDate() : null;
+  let mesSel = dataInicial ? dataInicial.getMonth() : null;
+  let anoSel = dataInicial ? dataInicial.getFullYear() : null;
+
+  let horaSel = dataInicial ? dataInicial.getHours() : 0;
+  let minutoSel = dataInicial ? dataInicial.getMinutes() : 0;
+
+  const nomesMeses = [
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+  ];
+  const diasSemana = ["D", "S", "T", "Q", "Q", "S", "S"];
+
+  // Cabeçalho (Mês e Ano + Navegação)
+  const header = document.createElement("div");
+  header.className = "cal-header";
+
+  const btnPrev = document.createElement("button");
+  btnPrev.type = "button";
+  btnPrev.className = "cal-btn-nav";
+  btnPrev.innerHTML = "‹";
+  btnPrev.title = "Mês anterior";
+
+  const tituloMesAno = document.createElement("span");
+  tituloMesAno.className = "cal-titulo-mes-ano";
+
+  const btnNext = document.createElement("button");
+  btnNext.type = "button";
+  btnNext.className = "cal-btn-nav";
+  btnNext.innerHTML = "›";
+  btnNext.title = "Próximo mês";
+
+  header.appendChild(btnPrev);
+  header.appendChild(tituloMesAno);
+  header.appendChild(btnNext);
+  popup.appendChild(header);
+
+  // Dias da Semana (D S T Q Q S S)
+  const semanaRow = document.createElement("div");
+  semanaRow.className = "cal-semana-row";
+  diasSemana.forEach((d) => {
+    const el = document.createElement("span");
+    el.className = "cal-semana-dia";
+    el.textContent = d;
+    semanaRow.appendChild(el);
+  });
+  popup.appendChild(semanaRow);
+
+  // Grade de Dias
+  const gridDias = document.createElement("div");
+  gridDias.className = "cal-grid-dias";
+  popup.appendChild(gridDias);
+
+  function atualizarHeader() {
+    tituloMesAno.textContent = `${nomesMeses[mesVisual]} ${anoVisual}`;
+  }
+
+  function renderizarDias() {
+    gridDias.innerHTML = "";
+    atualizarHeader();
+
+    const hoje = new Date();
+    const hojeDia = hoje.getDate();
+    const hojeMes = hoje.getMonth();
+    const hojeAno = hoje.getFullYear();
+
+    const primeiroDiaSemana = new Date(anoVisual, mesVisual, 1).getDay();
+    const totalDiasMes = new Date(anoVisual, mesVisual + 1, 0).getDate();
+    const totalDiasMesAnterior = new Date(anoVisual, mesVisual, 0).getDate();
+
+    // Dias do mês anterior
+    for (let i = primeiroDiaSemana - 1; i >= 0; i--) {
+      const diaNum = totalDiasMesAnterior - i;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cal-dia fora-mes";
+      btn.textContent = diaNum;
+      btn.addEventListener("click", () => {
+        if (mesVisual === 0) {
+          mesVisual = 11;
+          anoVisual--;
+        } else {
+          mesVisual--;
+        }
+        diaSel = diaNum;
+        mesSel = mesVisual;
+        anoSel = anoVisual;
+        renderizarDias();
+      });
+      gridDias.appendChild(btn);
+    }
+
+    // Dias do mês atual
+    for (let dia = 1; dia <= totalDiasMes; dia++) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cal-dia";
+      btn.textContent = dia;
+
+      const ehHoje = (dia === hojeDia && mesVisual === hojeMes && anoVisual === hojeAno);
+      if (ehHoje) btn.classList.add("hoje");
+
+      const ehSelecionado = (dia === diaSel && mesVisual === mesSel && anoVisual === anoSel);
+      if (ehSelecionado) btn.classList.add("selecionado");
+
+      btn.addEventListener("click", () => {
+        diaSel = dia;
+        mesSel = mesVisual;
+        anoSel = anoVisual;
+        renderizarDias();
+      });
+
+      // Duplo clique confirma e fecha
+      btn.addEventListener("dblclick", () => {
+        diaSel = dia;
+        mesSel = mesVisual;
+        anoSel = anoVisual;
+        confirmar();
+      });
+
+      gridDias.appendChild(btn);
+    }
+
+    // Dias do próximo mês para completar grade
+    const totalExibido = primeiroDiaSemana + totalDiasMes;
+    const totalCelulas = totalExibido > 35 ? 42 : 35;
+    const diasProximo = totalCelulas - totalExibido;
+    for (let dia = 1; dia <= diasProximo; dia++) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cal-dia fora-mes";
+      btn.textContent = dia;
+      btn.addEventListener("click", () => {
+        if (mesVisual === 11) {
+          mesVisual = 0;
+          anoVisual++;
+        } else {
+          mesVisual++;
+        }
+        diaSel = dia;
+        mesSel = mesVisual;
+        anoSel = anoVisual;
+        renderizarDias();
+      });
+      gridDias.appendChild(btn);
+    }
+  }
+
+  btnPrev.addEventListener("click", () => {
+    if (mesVisual === 0) {
+      mesVisual = 11;
+      anoVisual--;
+    } else {
+      mesVisual--;
+    }
+    renderizarDias();
+  });
+
+  btnNext.addEventListener("click", () => {
+    if (mesVisual === 11) {
+      mesVisual = 0;
+      anoVisual++;
+    } else {
+      mesVisual++;
+    }
+    renderizarDias();
+  });
+
+  // Seção de Horário
+  const secaoHorario = document.createElement("div");
+  secaoHorario.className = "cal-secao-horario";
+
+  const linhaHorario = document.createElement("div");
+  linhaHorario.className = "cal-linha-horario";
+
+  const rotuloHorario = document.createElement("span");
+  rotuloHorario.className = "cal-rotulo-horario";
+  rotuloHorario.innerHTML = '<span data-icone="relogio" data-tamanho="13"></span> Horário';
+
+  const inputsTempoWrapper = document.createElement("div");
+  inputsTempoWrapper.className = "cal-inputs-tempo-wrapper";
+
+  const inputHora = document.createElement("input");
+  inputHora.type = "number";
+  inputHora.className = "cal-input-tempo cal-hora";
+  inputHora.min = 0;
+  inputHora.max = 23;
+  inputHora.value = String(horaSel).padStart(2, "0");
+
+  const divisorTempo = document.createElement("span");
+  divisorTempo.className = "cal-tempo-divisor";
+  divisorTempo.textContent = ":";
+
+  const inputMinuto = document.createElement("input");
+  inputMinuto.type = "number";
+  inputMinuto.className = "cal-input-tempo cal-minuto";
+  inputMinuto.min = 0;
+  inputMinuto.max = 59;
+  inputMinuto.value = String(minutoSel).padStart(2, "0");
+
+  function validarTempo() {
+    let h = parseInt(inputHora.value, 10);
+    if (isNaN(h) || h < 0) h = 0;
+    if (h > 23) h = 23;
+    inputHora.value = String(h).padStart(2, "0");
+    horaSel = h;
+
+    let m = parseInt(inputMinuto.value, 10);
+    if (isNaN(m) || m < 0) m = 0;
+    if (m > 59) m = 59;
+    inputMinuto.value = String(m).padStart(2, "0");
+    minutoSel = m;
+  }
+
+  inputHora.addEventListener("change", validarTempo);
+  inputMinuto.addEventListener("change", validarTempo);
+  inputHora.addEventListener("input", () => {
+    let v = parseInt(inputHora.value, 10);
+    if (!isNaN(v) && v >= 0 && v <= 23) horaSel = v;
+  });
+  inputMinuto.addEventListener("input", () => {
+    let v = parseInt(inputMinuto.value, 10);
+    if (!isNaN(v) && v >= 0 && v <= 59) minutoSel = v;
+  });
+
+  inputsTempoWrapper.appendChild(inputHora);
+  inputsTempoWrapper.appendChild(divisorTempo);
+  inputsTempoWrapper.appendChild(inputMinuto);
+
+  linhaHorario.appendChild(rotuloHorario);
+  linhaHorario.appendChild(inputsTempoWrapper);
+  secaoHorario.appendChild(linhaHorario);
+
+  // Chips de Horários Rápidos
+  const chipsWrapper = document.createElement("div");
+  chipsWrapper.className = "cal-chips-horario";
+  const chips = [
+    { label: "00:00", h: 0, m: 0 },
+    { label: "08:00", h: 8, m: 0 },
+    { label: "12:00", h: 12, m: 0 },
+    { label: "18:00", h: 18, m: 0 },
+    { label: "23:59", h: 23, m: 59 }
+  ];
+  chips.forEach((c) => {
+    const chipBtn = document.createElement("button");
+    chipBtn.type = "button";
+    chipBtn.className = "cal-chip-tempo";
+    chipBtn.textContent = c.label;
+    chipBtn.addEventListener("click", () => {
+      horaSel = c.h;
+      minutoSel = c.m;
+      inputHora.value = String(c.h).padStart(2, "0");
+      inputMinuto.value = String(c.m).padStart(2, "0");
+    });
+    chipsWrapper.appendChild(chipBtn);
+  });
+  secaoHorario.appendChild(chipsWrapper);
+  popup.appendChild(secaoHorario);
+
+  // Rodapé de Ações
+  const rodape = document.createElement("div");
+  rodape.className = "cal-rodape";
+
+  const btnAgora = document.createElement("button");
+  btnAgora.type = "button";
+  btnAgora.className = "cal-btn-acao cal-btn-agora";
+  btnAgora.textContent = "Agora";
+  btnAgora.title = "Definir para data e hora atual";
+  btnAgora.addEventListener("click", () => {
+    const agora = new Date();
+    diaSel = agora.getDate();
+    mesSel = agora.getMonth();
+    anoSel = agora.getFullYear();
+    anoVisual = anoSel;
+    mesVisual = mesSel;
+    horaSel = agora.getHours();
+    minutoSel = agora.getMinutes();
+    inputHora.value = String(horaSel).padStart(2, "0");
+    inputMinuto.value = String(minutoSel).padStart(2, "0");
+    renderizarDias();
+  });
+
+  const grupoDireita = document.createElement("div");
+  grupoDireita.className = "cal-grupo-acoes-dir";
+
+  const btnLimpar = document.createElement("button");
+  btnLimpar.type = "button";
+  btnLimpar.className = "cal-btn-acao cal-btn-limpar";
+  btnLimpar.textContent = "Limpar";
+  btnLimpar.addEventListener("click", () => {
+    fecharCalendarioFofo();
+    aoConfirmar(null);
+  });
+
+  const btnAplicar = document.createElement("button");
+  btnAplicar.type = "button";
+  btnAplicar.className = "cal-btn-acao cal-btn-aplicar";
+  btnAplicar.textContent = "Aplicar";
+
+  function confirmar() {
+    validarTempo();
+    const finalAno = anoSel !== null ? anoSel : anoVisual;
+    const finalMes = mesSel !== null ? mesSel : mesVisual;
+    const finalDia = diaSel !== null ? diaSel : new Date().getDate();
+    const res = new Date(finalAno, finalMes, finalDia, horaSel, minutoSel, 0);
+    fecharCalendarioFofo();
+    aoConfirmar(res);
+  }
+
+  btnAplicar.addEventListener("click", confirmar);
+
+  grupoDireita.appendChild(btnLimpar);
+  grupoDireita.appendChild(btnAplicar);
+  rodape.appendChild(btnAgora);
+  rodape.appendChild(grupoDireita);
+  popup.appendChild(rodape);
+
+  renderizarDias();
+  substituirIcones(popup);
+  document.body.appendChild(popup);
+
+  // Posicionamento inteligente (flutua fixo abaixo ou acima do botão)
+  const rect = botaoAncora.getBoundingClientRect();
+  const largura = 295;
+  let left = rect.left;
+  if (left + largura > window.innerWidth - 12) {
+    left = window.innerWidth - largura - 12;
+  }
+  if (left < 12) left = 12;
+
+  let top = rect.bottom + 6;
+  const alturaEstimada = 385;
+  if (top + alturaEstimada > window.innerHeight - 12 && rect.top > alturaEstimada + 12) {
+    top = rect.top - alturaEstimada - 6;
+  }
+
+  popup.style.top = Math.round(top) + "px";
+  popup.style.left = Math.round(left) + "px";
+
+  setTimeout(() => {
+    document.addEventListener("pointerdown", fecharCalendarioFofoAoClicarFora);
+    document.addEventListener("keydown", fecharCalendarioFofoTeclado);
+  }, 10);
+}
+
+function criarSeletorDataFofo(rotuloPrefixo, placeholder, aoAlterar) {
+  let dataSelecionada = null;
+
+  const container = document.createElement("div");
+  container.className = "seletor-data-fofo-container";
+
+  const botaoGatilho = document.createElement("button");
+  botaoGatilho.type = "button";
+  botaoGatilho.className = "gatilho-data-fofo";
+  botaoGatilho.title = "Selecionar data e horário";
+
+  const spanIcone = document.createElement("span");
+  spanIcone.className = "icone-calendario-fofo";
+  spanIcone.dataset.icone = "calendario";
+  spanIcone.dataset.tamanho = "14";
+
+  const spanTexto = document.createElement("span");
+  spanTexto.className = "texto-data-fofo";
+  spanTexto.textContent = rotuloPrefixo + ": " + placeholder;
+
+  const botaoLimparIndividual = document.createElement("span");
+  botaoLimparIndividual.className = "limpar-data-fofo";
+  botaoLimparIndividual.textContent = "✕";
+  botaoLimparIndividual.title = "Limpar data";
+  botaoLimparIndividual.style.display = "none";
+
+  botaoLimparIndividual.addEventListener("click", (e) => {
+    e.stopPropagation();
+    definirValor(null);
+  });
+
+  botaoGatilho.appendChild(spanIcone);
+  botaoGatilho.appendChild(spanTexto);
+  botaoGatilho.appendChild(botaoLimparIndividual);
+  container.appendChild(botaoGatilho);
+
+  function formatarTextoData(data) {
+    if (!data) return rotuloPrefixo + ": " + placeholder;
+    const dia = String(data.getDate()).padStart(2, "0");
+    const mes = String(data.getMonth() + 1).padStart(2, "0");
+    const ano = String(data.getFullYear()).slice(-2);
+    const hora = String(data.getHours()).padStart(2, "0");
+    const min = String(data.getMinutes()).padStart(2, "0");
+    return `${rotuloPrefixo}: ${dia}/${mes}/${ano} ${hora}:${min}`;
+  }
+
+  function definirValor(novaData) {
+    dataSelecionada = novaData;
+    spanTexto.textContent = formatarTextoData(novaData);
+    if (novaData) {
+      botaoGatilho.classList.add("ativo");
+      botaoLimparIndividual.style.display = "inline-flex";
+    } else {
+      botaoGatilho.classList.remove("ativo");
+      botaoLimparIndividual.style.display = "none";
+    }
+    aoAlterar(dataSelecionada);
+  }
+
+  botaoGatilho.addEventListener("click", (e) => {
+    e.stopPropagation();
+    abrirCalendarioFofo(botaoGatilho, dataSelecionada, (dataConfirmada) => {
+      definirValor(dataConfirmada);
+    });
+  });
+
+  return {
+    elemento: container,
+    obterValor: () => dataSelecionada,
+    definirValor: definirValor
+  };
+}
+
+function montarBarraFiltrosHistorico(aoFiltrar, placeholderTexto) {
+  const container = document.createElement("div");
+  container.className = "barra-filtros-historico";
+
+  const buscaWrapper = document.createElement("div");
+  buscaWrapper.className = "busca-historico-wrapper";
+
+  const iconeBusca = document.createElement("span");
+  iconeBusca.className = "icone-busca-hist";
+  iconeBusca.dataset.icone = "busca";
+  iconeBusca.dataset.tamanho = "14";
+
+  const inputBusca = document.createElement("input");
+  inputBusca.type = "text";
+  inputBusca.className = "campo-busca-historico";
+  inputBusca.placeholder = placeholderTexto || "Buscar no histórico...";
+  inputBusca.autocomplete = "off";
+
+  buscaWrapper.appendChild(iconeBusca);
+  buscaWrapper.appendChild(inputBusca);
+
+  const periodoWrapper = document.createElement("div");
+  periodoWrapper.className = "periodo-historico-wrapper";
+
+  let dataInicio = null;
+  let dataFim = null;
+
+  const seletorInicio = criarSeletorDataFofo("De", "Início", (d) => {
+    dataInicio = d;
+    disparar();
+  });
+
+  const seletorFim = criarSeletorDataFofo("Até", "Fim", (d) => {
+    dataFim = d;
+    disparar();
+  });
+
+  const botaoLimpar = document.createElement("button");
+  botaoLimpar.type = "button";
+  botaoLimpar.className = "botao-limpar-filtros-hist";
+  botaoLimpar.title = "Limpar todos os filtros";
+  botaoLimpar.textContent = "✕";
+  botaoLimpar.style.display = "none";
+
+  periodoWrapper.appendChild(seletorInicio.elemento);
+  periodoWrapper.appendChild(seletorFim.elemento);
+  periodoWrapper.appendChild(botaoLimpar);
+
+  container.appendChild(buscaWrapper);
+  container.appendChild(periodoWrapper);
+
+  function disparar() {
+    const termo = inputBusca.value.trim();
+    const temFiltro = Boolean(termo || dataInicio || dataFim);
+    botaoLimpar.style.display = temFiltro ? "inline-flex" : "none";
+
+    const inicioSec = dataInicio ? Math.floor(dataInicio.getTime() / 1000) : null;
+    const fimSec = dataFim ? Math.floor(dataFim.getTime() / 1000) + 59 : null;
+
+    aoFiltrar({
+      termo,
+      inicioSec,
+      fimSec
+    });
+  }
+
+  inputBusca.addEventListener("input", disparar);
+
+  botaoLimpar.addEventListener("click", () => {
+    inputBusca.value = "";
+    seletorInicio.definirValor(null);
+    seletorFim.definirValor(null);
+    botaoLimpar.style.display = "none";
+    disparar();
+  });
+
+  return container;
+}
+
+function renderizarListaEventos(lista, eventosFiltrados, ehGlobal) {
+  lista.innerHTML = "";
+  if (eventosFiltrados.length === 0) {
+    lista.innerHTML = '<p class="texto-ajuda" style="padding: 12px 0;">Nenhum evento encontrado para os filtros selecionados.</p>';
+    return;
+  }
+  eventosFiltrados.slice(0, 300).forEach((ev) => {
+    const cartao = criarCartaoEvento(ev);
+    if (ehGlobal) {
+      const origem = document.createElement("div");
+      origem.className = "texto-ajuda";
+      origem.style.fontWeight = "700";
+      origem.style.marginBottom = "4px";
+      origem.textContent = (ev._origem === "coluna" ? "Coluna: " : (ev._origem === "card" ? "Card: " : "")) + (ev._nome || "—");
+      cartao.insertBefore(origem, cartao.firstChild);
+    }
+    lista.appendChild(cartao);
+  });
+}
+
+// ------------------------------------------------------------
 // HISTÓRICO DO CARD
 // ------------------------------------------------------------
 async function abrirHistoricoCard(card) {
+  modalConteudo.classList.add("modal-conteudo-largo");
   const caixa = document.createElement("div");
   caixa.className = "modal-interno";
   caixa.innerHTML = "<h3>Histórico — " + (card.nomeConta || "card") + "</h3>" +
-    '<p class="texto-ajuda">Carregando...</p>';
+    '<p class="texto-ajuda mensagem-carregando">Carregando...</p>';
 
   const botaoFechar = document.createElement("button");
   botaoFechar.textContent = "Fechar";
@@ -1779,22 +3155,28 @@ async function abrirHistoricoCard(card) {
   try {
     const snap = await getDocs(collection(db, "cards", card.id, "historico"));
     const eventos = [];
-    snap.forEach((d) => eventos.push({ id: d.id, ...d.data() }));
+    snap.forEach((d) => eventos.push({ id: d.id, ...d.data(), _origem: "card", _nome: card.nomeConta, _card: card }));
     eventos.sort((a, b) => segundosDe(b.timestamp) - segundosDe(a.timestamp));
 
+    const carregando = caixa.querySelector(".mensagem-carregando");
+    if (carregando) carregando.remove();
+
     const lista = document.createElement("div");
-    if (eventos.length === 0) {
-      lista.innerHTML = '<p class="texto-ajuda">Nenhum evento registrado.</p>';
-    } else {
-      eventos.forEach((ev) => lista.appendChild(criarCartaoEvento(ev)));
-    }
+    lista.className = "lista-eventos-historico";
+
+    const barraFiltros = montarBarraFiltrosHistorico((filtros) => {
+      const filtrados = eventos.filter((ev) => eventoCorrespondeFiltros(ev, filtros));
+      renderizarListaEventos(lista, filtrados, false);
+    }, "Buscar por colaborador ou termo...");
+
+    caixa.insertBefore(barraFiltros, botaoFechar);
     caixa.insertBefore(lista, botaoFechar);
+
+    renderizarListaEventos(lista, eventos, false);
+    substituirIcones(caixa);
   } catch (erro) {
-    caixa.insertBefore(
-      Object.assign(document.createElement("p"),
-        { className: "texto-ajuda", textContent: "Erro ao carregar o histórico." }),
-      botaoFechar
-    );
+    const carregando = caixa.querySelector(".mensagem-carregando");
+    if (carregando) carregando.textContent = "Erro ao carregar o histórico.";
   }
 }
 
@@ -1802,10 +3184,11 @@ async function abrirHistoricoCard(card) {
 // HISTÓRICO DA COLUNA
 // ------------------------------------------------------------
 async function abrirHistoricoColuna(coluna) {
+  modalConteudo.classList.add("modal-conteudo-largo");
   const caixa = document.createElement("div");
   caixa.className = "modal-interno";
   caixa.innerHTML = "<h3>Histórico — " + coluna.nome + "</h3>" +
-    '<p class="texto-ajuda">Carregando...</p>';
+    '<p class="texto-ajuda mensagem-carregando">Carregando...</p>';
 
   const botaoFechar = document.createElement("button");
   botaoFechar.textContent = "Fechar";
@@ -1818,27 +3201,43 @@ async function abrirHistoricoColuna(coluna) {
   try {
     const snap = await getDocs(collection(db, "colunas", coluna.id, "historico"));
     const eventos = [];
-    snap.forEach((d) => eventos.push({ id: d.id, ...d.data() }));
+    snap.forEach((d) => {
+      const data = d.data();
+      const cardAssoc = encontrarCardHistorico(data.cardId);
+      eventos.push({
+        id: d.id,
+        ...data,
+        _origem: "coluna",
+        _nome: coluna.nome,
+        _card: cardAssoc
+      });
+    });
     eventos.sort((a, b) => segundosDe(b.timestamp) - segundosDe(a.timestamp));
 
+    const carregando = caixa.querySelector(".mensagem-carregando");
+    if (carregando) carregando.remove();
+
     const lista = document.createElement("div");
-    if (eventos.length === 0) {
-      lista.innerHTML = '<p class="texto-ajuda">Nenhum evento registrado.</p>';
-    } else {
-      eventos.forEach((ev) => lista.appendChild(criarCartaoEvento(ev)));
-    }
+    lista.className = "lista-eventos-historico";
+
+    const barraFiltros = montarBarraFiltrosHistorico((filtros) => {
+      const filtrados = eventos.filter((ev) => eventoCorrespondeFiltros(ev, filtros));
+      renderizarListaEventos(lista, filtrados, false);
+    }, "Buscar por card, telefone, e-mail, razão social ou colaborador...");
+
+    caixa.insertBefore(barraFiltros, botaoFechar);
     caixa.insertBefore(lista, botaoFechar);
+
+    renderizarListaEventos(lista, eventos, false);
+    substituirIcones(caixa);
   } catch (erro) {
-    caixa.insertBefore(
-      Object.assign(document.createElement("p"),
-        { className: "texto-ajuda", textContent: "Erro ao carregar o histórico." }),
-      botaoFechar
-    );
+    const carregando = caixa.querySelector(".mensagem-carregando");
+    if (carregando) carregando.textContent = "Erro ao carregar o histórico.";
   }
 }
 
 // ------------------------------------------------------------
-// CARTÃO DE EVENTO (usado nos dois históricos)
+// CARTÃO DE EVENTO (usado nos históricos)
 // ------------------------------------------------------------
 function criarCartaoEvento(ev) {
   const div = document.createElement("div");
@@ -1859,8 +3258,12 @@ function criarCartaoEvento(ev) {
       descricao = "Mensagem programada para " + (ev.detalhes?.dataHora || "—");
       break;
     case "exclusao": descricao = "Card excluído"; break;
-    case "entrada": descricao = "Card entrou na coluna"; break;
-    case "saida": descricao = "Card saiu da coluna"; break;
+    case "entrada":
+      descricao = "Card entrou na coluna" + (ev.cardResumo ? ': "' + ev.cardResumo + '"' : "");
+      break;
+    case "saida":
+      descricao = "Card saiu da coluna" + (ev.cardResumo ? ': "' + ev.cardResumo + '"' : "");
+      break;
     case "configuracao": descricao = "Configuração alterada"; break;
     case "reordenacao":
       descricao = "Colunas reordenadas: " + (ev.detalhes?.ordem || "—");
@@ -1872,13 +3275,25 @@ function criarCartaoEvento(ev) {
     descricao += " (automático por diretriz de " + (ev.diretrizDe.nome || ev.diretrizDe.email) + ")";
   }
 
+  let infoCard = "";
+  if (ev._card) {
+    const partes = [];
+    if (ev._card.razaoSocial) partes.push(ev._card.razaoSocial);
+    if (ev._card.telefone) partes.push(ev._card.telefone);
+    if (ev._card.email) partes.push(ev._card.email);
+    if (partes.length > 0) {
+      infoCard = '<div class="texto-ajuda" style="margin-top: 3px; font-size: 11px;">' + partes.join(" · ") + '</div>';
+    }
+  }
+
   div.innerHTML =
     '<div class="linha-evento-topo">' +
       '<span class="etiqueta-evento">' + (ev.tipo || "evento") + "</span>" +
       '<span class="hora-evento">' + formatarData(ev.timestamp) + "</span>" +
     "</div>" +
     "<div>" + descricao + "</div>" +
-    '<div class="texto-ajuda">Por: ' + autor + "</div>";
+    infoCard +
+    '<div class="texto-ajuda" style="margin-top: 2px;">Por: ' + autor + "</div>";
 
   return div;
 }
@@ -1888,10 +3303,11 @@ function criarCartaoEvento(ev) {
 // ------------------------------------------------------------
 async function abrirHistoricoGlobal() {
   menuKanban.classList.remove("aberta");
+  modalConteudo.classList.add("modal-conteudo-largo");
   const caixa = document.createElement("div");
   caixa.className = "modal-interno";
   caixa.innerHTML = "<h3>Histórico geral</h3>" +
-    '<p class="texto-ajuda">Carregando eventos de todas as colunas e cards...</p>';
+    '<p class="texto-ajuda mensagem-carregando">Carregando eventos de todas as colunas e cards...</p>';
 
   const botaoFechar = document.createElement("button");
   botaoFechar.textContent = "Fechar";
@@ -1904,46 +3320,81 @@ async function abrirHistoricoGlobal() {
   try {
     const todos = [];
 
+    // Colunas
     for (const coluna of cacheColunas) {
       const snap = await getDocs(collection(db, "colunas", coluna.id, "historico"));
       snap.forEach((d) => {
-        todos.push({ ...d.data(), _origem: "coluna", _nome: coluna.nome });
+        const data = d.data();
+        const cardAssoc = encontrarCardHistorico(data.cardId);
+        todos.push({
+          id: d.id,
+          ...data,
+          _origem: "coluna",
+          _nome: coluna.nome,
+          _card: cardAssoc
+        });
       });
     }
 
+    // Cards ativos
     for (const card of cacheCards) {
       const snap = await getDocs(collection(db, "cards", card.id, "historico"));
       snap.forEach((d) => {
-        todos.push({ ...d.data(), _origem: "card", _nome: card.nomeConta });
+        todos.push({
+          id: d.id,
+          ...d.data(),
+          _origem: "card",
+          _nome: card.nomeConta,
+          _card: card
+        });
       });
     }
 
+    // Cards excluídos
+    for (const card of cacheCardsExcluidos) {
+      const snap = await getDocs(collection(db, "cards", card.id, "historico"));
+      snap.forEach((d) => {
+        todos.push({
+          id: d.id,
+          ...d.data(),
+          _origem: "card",
+          _nome: card.nomeConta,
+          _card: card
+        });
+      });
+    }
+
+    // Histórico global
     const snapGlobal = await getDocs(collection(db, "historicoGlobal"));
     snapGlobal.forEach((d) => {
-      todos.push({ ...d.data(), _origem: "global", _nome: "Kanban" });
+      todos.push({
+        id: d.id,
+        ...d.data(),
+        _origem: "global",
+        _nome: "Kanban"
+      });
     });
 
     todos.sort((a, b) => segundosDe(b.timestamp) - segundosDe(a.timestamp));
 
-    const lista = document.createElement("div");
-    if (todos.length === 0) {
-      lista.innerHTML = '<p class="texto-ajuda">Nenhum evento registrado.</p>';
-    } else {
-      todos.slice(0, 200).forEach((ev) => {
-        const cartao = criarCartaoEvento(ev);
-        const origem = document.createElement("div");
-        origem.className = "texto-ajuda";
-        origem.textContent = (ev._origem === "coluna" ? "Coluna: " : "Card: ") + (ev._nome || "—");
-        cartao.insertBefore(origem, cartao.firstChild);
-        lista.appendChild(cartao);
-      });
-    }
-
-    const carregando = caixa.querySelector(".texto-ajuda");
+    const carregando = caixa.querySelector(".mensagem-carregando");
     if (carregando) carregando.remove();
+
+    const lista = document.createElement("div");
+    lista.className = "lista-eventos-historico";
+
+    const barraFiltros = montarBarraFiltrosHistorico((filtros) => {
+      const filtrados = todos.filter((ev) => eventoCorrespondeFiltros(ev, filtros));
+      renderizarListaEventos(lista, filtrados, true);
+    }, "Buscar por coluna, card, telefone, e-mail, razão social ou colaborador...");
+
+    caixa.insertBefore(barraFiltros, botaoFechar);
     caixa.insertBefore(lista, botaoFechar);
+
+    renderizarListaEventos(lista, todos, true);
+    substituirIcones(caixa);
   } catch (erro) {
-    const carregando = caixa.querySelector(".texto-ajuda");
+    const carregando = caixa.querySelector(".mensagem-carregando");
     if (carregando) carregando.textContent = "Erro ao carregar o histórico.";
   }
 }
@@ -2005,28 +3456,193 @@ function abrirExcluidos() {
 // ------------------------------------------------------------
 // CONFIGURAÇÕES (vínculo Perdida/Finalizada)
 // ------------------------------------------------------------
+function criarCampoSeletorColunaAcolhedor(tipoId, rotuloTipo, iconeTipo, idValorInicial, classeTag) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "campo-seletor-cfg-wrapper";
+
+  const rotulo = document.createElement("label");
+  rotulo.className = "rotulo-cfg-seletor";
+  rotulo.innerHTML =
+    '<span class="selo-cfg-tag ' + classeTag + '">' +
+      '<span data-icone="' + iconeTipo + '" data-tamanho="11"></span> ' + rotuloTipo +
+    '</span>' +
+    '<span class="texto-rotulo-cfg">Coluna para cards "' + rotuloTipo + '"</span>';
+  wrapper.appendChild(rotulo);
+
+  const inputHidden = document.createElement("input");
+  inputHidden.type = "hidden";
+  inputHidden.id = tipoId;
+  inputHidden.value = idValorInicial || "";
+  wrapper.appendChild(inputHidden);
+
+  const gatilho = document.createElement("button");
+  gatilho.type = "button";
+  gatilho.className = "gatilho-seletor-cfg";
+  gatilho.setAttribute("aria-expanded", "false");
+
+  const mioloGatilho = document.createElement("div");
+  mioloGatilho.className = "miolo-gatilho-cfg";
+
+  const pontoGatilho = document.createElement("span");
+  pontoGatilho.className = "ponto-cor-coluna";
+
+  const textoGatilho = document.createElement("span");
+  textoGatilho.className = "texto-gatilho-cfg";
+
+  mioloGatilho.appendChild(pontoGatilho);
+  mioloGatilho.appendChild(textoGatilho);
+  gatilho.appendChild(mioloGatilho);
+
+  const chevron = document.createElement("span");
+  chevron.className = "chevron-cfg-svg";
+  chevron.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+  gatilho.appendChild(chevron);
+
+  wrapper.appendChild(gatilho);
+
+  const menuDrop = document.createElement("div");
+  menuDrop.className = "menu-seletor-cfg-drop";
+  menuDrop.style.display = "none";
+
+  function atualizarVisualGatilho(idSelecionado) {
+    const coluna = cacheColunas.find((c) => c.id === idSelecionado);
+    if (coluna) {
+      pontoGatilho.className = "ponto-cor-coluna ponto-cor-" + (coluna.cor || "lilas");
+      textoGatilho.textContent = coluna.nome;
+    } else {
+      pontoGatilho.className = "ponto-cor-coluna ponto-cor-nenhuma";
+      textoGatilho.textContent = "Nenhuma vinculação";
+    }
+  }
+
+  function fecharDrop() {
+    menuDrop.style.display = "none";
+    gatilho.classList.remove("aberto");
+    gatilho.setAttribute("aria-expanded", "false");
+  }
+
+  function abrirDrop() {
+    document.querySelectorAll(".menu-seletor-cfg-drop").forEach((m) => {
+      if (m !== menuDrop) m.style.display = "none";
+    });
+    document.querySelectorAll(".gatilho-seletor-cfg").forEach((g) => {
+      if (g !== gatilho) g.classList.remove("aberto");
+    });
+    menuDrop.style.display = "block";
+    gatilho.classList.add("aberto");
+    gatilho.setAttribute("aria-expanded", "true");
+    substituirIcones(menuDrop);
+  }
+
+  gatilho.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (menuDrop.style.display === "none") {
+      abrirDrop();
+    } else {
+      fecharDrop();
+    }
+  });
+
+  // Opção Nenhuma
+  const itemNenhuma = document.createElement("button");
+  itemNenhuma.type = "button";
+  itemNenhuma.className = "item-opcao-cfg-coluna" + (!idValorInicial ? " ativo" : "");
+  itemNenhuma.innerHTML =
+    '<span class="ponto-cor-coluna ponto-cor-nenhuma"></span>' +
+    '<span class="nome-coluna-cfg">Nenhuma vinculação</span>' +
+    '<span class="subtexto-coluna-cfg">(não mover)</span>' +
+    '<span class="check-cfg-item" data-icone="check" data-tamanho="12"></span>';
+
+  itemNenhuma.addEventListener("click", (e) => {
+    e.stopPropagation();
+    inputHidden.value = "";
+    atualizarVisualGatilho("");
+    menuDrop.querySelectorAll(".item-opcao-cfg-coluna").forEach((el) => el.classList.remove("ativo"));
+    itemNenhuma.classList.add("ativo");
+    fecharDrop();
+  });
+  menuDrop.appendChild(itemNenhuma);
+
+  const divisor = document.createElement("div");
+  divisor.className = "divisor-cfg-menu";
+  menuDrop.appendChild(divisor);
+
+  const tituloSecao = document.createElement("div");
+  tituloSecao.className = "titulo-secao-cfg-drop";
+  tituloSecao.textContent = "Colunas do Kanban";
+  menuDrop.appendChild(tituloSecao);
+
+  cacheColunas.forEach((c) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    const selecionado = idValorInicial === c.id;
+    item.className = "item-opcao-cfg-coluna" + (selecionado ? " ativo" : "");
+
+    const cor = c.cor || "lilas";
+    const ehFunc = c.tipo === "funcionaria";
+
+    item.innerHTML =
+      '<span class="ponto-cor-coluna ponto-cor-' + cor + '"></span>' +
+      '<span class="nome-coluna-cfg">' + c.nome + '</span>' +
+      (ehFunc ? '<span class="selo-coluna-func-cfg">Automação</span>' : '') +
+      '<span class="check-cfg-item" data-icone="check" data-tamanho="12"></span>';
+
+    item.addEventListener("click", (e) => {
+      e.stopPropagation();
+      inputHidden.value = c.id;
+      atualizarVisualGatilho(c.id);
+      menuDrop.querySelectorAll(".item-opcao-cfg-coluna").forEach((el) => el.classList.remove("ativo"));
+      item.classList.add("ativo");
+      fecharDrop();
+    });
+
+    menuDrop.appendChild(item);
+  });
+
+  wrapper.appendChild(menuDrop);
+  atualizarVisualGatilho(idValorInicial);
+
+  return wrapper;
+}
+
 function abrirConfiguracoes() {
   menuKanban.classList.remove("aberta");
   const caixa = document.createElement("div");
   caixa.className = "modal-interno";
 
-  let opcoesPerdida = '<option value="">Nenhuma</option>';
-  let opcoesFinalizada = '<option value="">Nenhuma</option>';
+  const titulo = document.createElement("h3");
+  titulo.textContent = "Configurações";
+  caixa.appendChild(titulo);
 
-  cacheColunas.forEach((c) => {
-    const selP = configKanban.colunaPerdidaId === c.id ? " selected" : "";
-    const selF = configKanban.colunaFinalizadaId === c.id ? " selected" : "";
-    opcoesPerdida += '<option value="' + c.id + '"' + selP + ">" + c.nome + "</option>";
-    opcoesFinalizada += '<option value="' + c.id + '"' + selF + ">" + c.nome + "</option>";
+  const textoAjuda = document.createElement("p");
+  textoAjuda.className = "texto-ajuda";
+  textoAjuda.textContent = "Vincule colunas às marcações. Ao marcar um card, ele será movido automaticamente.";
+  caixa.appendChild(textoAjuda);
+
+  const seletorPerdida = criarCampoSeletorColunaAcolhedor(
+    "cfg-perdida",
+    "Perdida",
+    "x",
+    configKanban.colunaPerdidaId,
+    "selo-cfg-perdida"
+  );
+  caixa.appendChild(seletorPerdida);
+
+  const seletorFinalizada = criarCampoSeletorColunaAcolhedor(
+    "cfg-finalizada",
+    "Finalizada",
+    "check",
+    configKanban.colunaFinalizadaId,
+    "selo-cfg-finalizada"
+  );
+  caixa.appendChild(seletorFinalizada);
+
+  caixa.addEventListener("click", (e) => {
+    if (!e.target.closest(".campo-seletor-cfg-wrapper")) {
+      caixa.querySelectorAll(".menu-seletor-cfg-drop").forEach((m) => (m.style.display = "none"));
+      caixa.querySelectorAll(".gatilho-seletor-cfg").forEach((g) => g.classList.remove("aberto"));
+    }
   });
-
-  caixa.innerHTML =
-    "<h3>Configurações</h3>" +
-    '<p class="texto-ajuda">Vincule colunas às marcações. Ao marcar um card, ele será movido automaticamente.</p>' +
-    "<label>Coluna para cards \"Perdida\"</label>" +
-    '<select id="cfg-perdida">' + opcoesPerdida + "</select>" +
-    "<label>Coluna para cards \"Finalizada\"</label>" +
-    '<select id="cfg-finalizada">' + opcoesFinalizada + "</select>";
 
   const botaoCancelar = document.createElement("button");
   botaoCancelar.textContent = "Cancelar";
@@ -2066,6 +3682,7 @@ function abrirConfiguracoes() {
   linha.appendChild(botaoSalvar);
   caixa.appendChild(linha);
 
+  substituirIcones(caixa);
   abrirModal(caixa);
 }
 
@@ -2168,6 +3785,7 @@ function iniciarSistemaReordenacao() {
     if (arrastoAtivo) return;
     const coluna = evento.target.closest(".coluna");
     if (!coluna) return;
+    if (!evento.target.closest(".cabecalho-coluna") && !evento.target.closest(".corpo-coluna")) return;
     if (evento.target.closest("button")) return;
     if (evento.target.closest(".card-conversa")) return;
 
@@ -2232,14 +3850,18 @@ function iniciarSistemaReordenacao() {
 
 function iniciarArrastoColuna(coluna, x, y) {
   const rect = coluna.getBoundingClientRect();
+  const cab = coluna.querySelector(".cabecalho-coluna");
+  const corpo = coluna.querySelector(".corpo-coluna");
+  const alturaVisual = (cab ? cab.offsetHeight : 0) + (corpo ? corpo.offsetHeight : 0) + 5;
   arrastoAtivo = true;
   colunaSendoArrastada = coluna;
 
   colunaFlutuante = coluna.cloneNode(true);
   colunaFlutuante.classList.remove("coluna-arrastando");
   colunaFlutuante.classList.add("coluna-flutuante-coluna");
+  colunaFlutuante.style.minHeight = "0px";
   colunaFlutuante.style.width = rect.width + "px";
-  colunaFlutuante.style.height = rect.height + "px";
+  colunaFlutuante.style.height = (alturaVisual || rect.height) + "px";
   colunaFlutuante.style.left = rect.left + "px";
   colunaFlutuante.style.top = rect.top + "px";
   document.body.appendChild(colunaFlutuante);
@@ -2272,7 +3894,6 @@ function moverColunaFlutuante(evento) {
   const dx = Math.abs(evento.clientX - ultimoMouseX);
   const dy = Math.abs(evento.clientY - ultimoMouseY);
   const emMovimento = dx > 2 || dy > 2;
-
   if (emMovimento) {
     colunaFlutuante.classList.remove("parada");
     ultimoMouseX = evento.clientX;
@@ -2282,6 +3903,93 @@ function moverColunaFlutuante(evento) {
       if (colunaFlutuante) colunaFlutuante.classList.add("parada");
     }, 180);
   }
+
+  atualizarAutoScroll(evento.clientX);
+}
+
+// ------------------------------------------------------------
+// AUTO-SCROLL DO KANBAN DURANTE O ARRASTO DE COLUNA
+// Quando o ponteiro chega a 25px de uma borda lateral do kanban,
+// a rolagem horizontal avança sozinha, revelando o conteúdo que
+// estava fora da tela. A velocidade cresce conforme o ponteiro
+// se aproxima da borda.
+// ------------------------------------------------------------
+const ZONA_BORDA = 25;
+const VELOCIDADE_MAXIMA = 18;
+
+let autoScrollAtivo = false;
+let direcaoAutoScroll = 0;
+let intensidadeAutoScroll = 0;
+let quadroAutoScroll = null;
+
+function atualizarAutoScroll(clientX) {
+  const rect = kanban.getBoundingClientRect();
+
+  const dentroVertical =
+    clientX >= rect.left - ZONA_BORDA &&
+    clientX <= rect.right + ZONA_BORDA;
+
+  if (!dentroVertical) {
+    pararAutoScroll();
+    return;
+  }
+
+  const distanciaEsquerda = clientX - rect.left;
+  const distanciaDireita = rect.right - clientX;
+
+  if (distanciaEsquerda < ZONA_BORDA) {
+    direcaoAutoScroll = -1;
+    intensidadeAutoScroll = 1 - Math.max(0, distanciaEsquerda) / ZONA_BORDA;
+  } else if (distanciaDireita < ZONA_BORDA) {
+    direcaoAutoScroll = 1;
+    intensidadeAutoScroll = 1 - Math.max(0, distanciaDireita) / ZONA_BORDA;
+  } else {
+    pararAutoScroll();
+    return;
+  }
+
+  intensidadeAutoScroll = Math.min(1, Math.max(0.15, intensidadeAutoScroll));
+  iniciarAutoScroll();
+}
+
+function iniciarAutoScroll() {
+  if (autoScrollAtivo) return;
+  autoScrollAtivo = true;
+  executarAutoScroll();
+}
+
+function executarAutoScroll() {
+  if (!autoScrollAtivo) return;
+
+  const velocidade = VELOCIDADE_MAXIMA * intensidadeAutoScroll;
+  const antes = kanban.scrollLeft;
+  kanban.scrollLeft = antes + direcaoAutoScroll * velocidade;
+
+  if (kanban.scrollLeft !== antes) {
+    atualizarIndicadorPosicaoMouse();
+  }
+
+  quadroAutoScroll = requestAnimationFrame(executarAutoScroll);
+}
+
+function pararAutoScroll() {
+  autoScrollAtivo = false;
+  direcaoAutoScroll = 0;
+  intensidadeAutoScroll = 0;
+  if (quadroAutoScroll) {
+    cancelAnimationFrame(quadroAutoScroll);
+    quadroAutoScroll = null;
+  }
+}
+
+// Recalcula a posição do indicador usando a última posição do mouse,
+// para o indicador acompanhar a rolagem automática.
+function atualizarIndicadorPosicaoMouse() {
+  if (!indicadorPosicao || !arrastoAtivo) return;
+  atualizarIndicadorPosicao({
+    clientX: ultimoMouseX,
+    clientY: ultimoMouseY
+  });
 }
 
 function atualizarIndicadorPosicao(evento) {
@@ -2370,19 +4078,26 @@ function cancelarArrastoColuna() {
 }
 
 function limparEstadoArrastoColuna() {
+  pararAutoScroll();
+  esconderColunaFantasma();
+
   arrastoAtivo = false;
+
   if (colunaFlutuante) {
     colunaFlutuante.remove();
     colunaFlutuante = null;
   }
+
   if (indicadorPosicao) {
     indicadorPosicao.remove();
     indicadorPosicao = null;
   }
+
   if (colunaSendoArrastada) {
     colunaSendoArrastada.classList.remove("coluna-arrastando");
     colunaSendoArrastada = null;
   }
+
   kanban.classList.remove("arrastando-coluna");
   document.body.style.cursor = "";
   document.body.style.userSelect = "";

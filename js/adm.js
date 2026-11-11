@@ -34,6 +34,13 @@ import {
   collection, addDoc, updateDoc, doc, onSnapshot, serverTimestamp, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+import {
+  iniciarLayoutBase,
+  aplicarPermissoesSidebar,
+  obterDadosUsuario,
+  atualizarCabecalhoUsuario
+} from "./layout-base.js";
+
 // ------------------------------------------------------------
 // LISTA DE ADMINISTRADORES
 // O e-mail dono do sistema: acesso garantido ao painel,
@@ -84,24 +91,27 @@ const authSecundario = getAuth(appSecundario);
 // ------------------------------------------------------------
 // Capturando elementos da tela
 // ------------------------------------------------------------
-const boasVindas = document.getElementById("boas-vindas");
-const conteudoAdmin = document.getElementById("conteudo-admin");
-const acessoNegado = document.getElementById("acesso-negado");
+const conteudoProtegido = document.getElementById("conteudo-protegido");
+const nomeUsuario = document.getElementById("nome-usuario");
+const emailUsuario = document.getElementById("email-usuario");
+const avatar = document.getElementById("avatar");
+const contagemUsuarios = document.getElementById("contagem-usuarios");
+const contagemPendentes = document.getElementById("contagem-pendentes");
+
 const botaoGerar = document.getElementById("botao-gerar-codigo");
-const blocoCodigoGerado = document.getElementById("bloco-codigo-gerado");
-const codigoGerado = document.getElementById("codigo-gerado");
-const botaoCopiar = document.getElementById("botao-copiar-codigo");
-const listaPendentes = document.getElementById("lista-pendentes");
-const listaAprovados = document.getElementById("lista-aprovados");
-const listaRejeitados = document.getElementById("lista-rejeitados");
+const areaCodigoGerado = document.getElementById("area-codigo-gerado");
+const listaSolicitacoes = document.getElementById("lista-solicitacoes");
 const botaoSair = document.getElementById("botao-sair");
 const areaMensagem = document.getElementById("mensagem");
+
+let filtroAtual = "pendente";
 
 // "Cache" local das solicitações. O onSnapshot o mantém sempre
 // atualizado; as funções de renderização apenas o leem.
 let cacheSolicitacoes = [];
 
 function mostrarMensagem(texto, tipo) {
+  if (!areaMensagem) return;
   areaMensagem.textContent = texto;
   areaMensagem.className = "mensagem " + tipo;
 }
@@ -112,10 +122,7 @@ function mostrarMensagem(texto, tipo) {
 // 1. O e-mail está na lista ADMINISTRADORES (dono do sistema).
 // 2. O usuário está logado, tem status "aprovada" e cargo
 //    "administracao" no banco (admins promovidos pelo dono).
-// Qualquer outro caso vê a mensagem de acesso negado.
-// O callback virou "async" porque a verificação do cargo
-// consulta o banco — usamos "await" para a resposta chegar
-// ANTES de decidir o que mostrar na tela.
+// Qualquer outro caso é redirecionado para home.html.
 // ------------------------------------------------------------
 onAuthStateChanged(auth, async (usuario) => {
   if (!usuario) {
@@ -128,13 +135,18 @@ onAuthStateChanged(auth, async (usuario) => {
   if (!ehAdminEmail) {
     const temCargoAdmin = await usuarioTemCargoAdmin(usuario.email);
     if (!temCargoAdmin) {
-      acessoNegado.style.display = "block";
+      window.location.href = "home.html";
       return;
     }
   }
 
-  boasVindas.textContent = "Logado como: " + usuario.email;
-  conteudoAdmin.style.display = "block";
+  if (conteudoProtegido) conteudoProtegido.classList.remove("oculto");
+  iniciarLayoutBase();
+  aplicarPermissoesSidebar("administracao", true);
+
+  const dadosUsuario = await obterDadosUsuario(usuario, db);
+  atualizarCabecalhoUsuario(dadosUsuario);
+
   escutarSolicitacoes();
 });
 
@@ -168,17 +180,13 @@ async function usuarioTemCargoAdmin(email) {
 
 // ------------------------------------------------------------
 // NAVEGAÇÃO ENTRE ABAS
-// Para cada botão de aba, registramos um clique que:
-// 1. Remove o destaque de todas as abas e aplica só nesta.
-// 2. Esconde todos os painéis e mostra apenas o correspondente.
 // ------------------------------------------------------------
-document.querySelectorAll(".aba").forEach((botao) => {
+document.querySelectorAll(".aba-adm").forEach((botao) => {
   botao.addEventListener("click", () => {
-    document.querySelectorAll(".aba").forEach((b) => b.classList.remove("aba-ativa"));
-    botao.classList.add("aba-ativa");
-
-    document.querySelectorAll(".painel-aba").forEach((p) => p.classList.remove("painel-visivel"));
-    document.getElementById("painel-" + botao.dataset.aba).classList.add("painel-visivel");
+    document.querySelectorAll(".aba-adm").forEach((b) => b.classList.remove("ativa"));
+    botao.classList.add("ativa");
+    filtroAtual = botao.dataset.filtro;
+    renderizarSolicitacoes();
   });
 });
 
@@ -186,43 +194,67 @@ document.querySelectorAll(".aba").forEach((botao) => {
 // ESCUTAR O BANCO EM TEMPO REAL
 // Um único onSnapshot na coleção inteira. A cada mudança
 // (nova solicitação, aprovação, bloqueio...), o cache é
-// refeito e as três abas são redesenhadas sozinhas.
+// refeito e a lista é redesenhada sozinha.
 // ------------------------------------------------------------
 function escutarSolicitacoes() {
   onSnapshot(collection(db, "solicitacoes"), (resultado) => {
     cacheSolicitacoes = [];
+    let aprovados = 0;
+    let pendentes = 0;
+
     resultado.forEach((documento) => {
-      // "...documento.data()" espalha os campos (nome, email,
-      // status...) dentro do objeto, junto com o id do documento.
-      cacheSolicitacoes.push({ id: documento.id, ...documento.data() });
+      const dados = documento.data();
+      cacheSolicitacoes.push({ id: documento.id, ...dados });
+      if (dados.status === "aprovada") aprovados++;
+      if (dados.status === "pendente") pendentes++;
     });
-    renderizarPendentes();
-    renderizarAprovados();
-    renderizarRejeitados();
+
+    if (contagemUsuarios) contagemUsuarios.textContent = aprovados;
+    if (contagemPendentes) contagemPendentes.textContent = pendentes;
+
+    renderizarSolicitacoes();
   });
+}
+
+function renderizarSolicitacoes() {
+  if (!listaSolicitacoes) return;
+
+  if (filtroAtual === "pendente") {
+    renderizarPendentes();
+  } else if (filtroAtual === "aprovada") {
+    renderizarAprovados();
+  } else if (filtroAtual === "rejeitada") {
+    renderizarRejeitados();
+  }
 }
 
 // ------------------------------------------------------------
 // FUNÇÃO AUXILIAR: criar um cartão básico
-// Evita repetição: monta a caixa com nome, e-mail, CARGO e
-// etiqueta de status. As abas adicionam os botões que lhes cabem.
 // ------------------------------------------------------------
 function criarCartao(dados, textoStatus, classeStatus) {
   const cartao = document.createElement("div");
   cartao.className = "cartao-solicitacao";
 
+  const info = document.createElement("div");
+  info.className = "info-solicitacao";
+
   const etiqueta = document.createElement("span");
   etiqueta.className = "etiqueta-status " + classeStatus;
   etiqueta.textContent = textoStatus;
 
-  cartao.innerHTML =
-    "<strong>" + dados.nome + "</strong><br>" +
-    dados.email + "<br>" +
-    '<span class="texto-ajuda">Cargo: ' + (NOMES_CARGOS[dados.cargo] || "—") + "<br>" +
-    "Código usado: " + dados.codigo + "</span>";
+  info.appendChild(etiqueta);
 
-  // insertBefore coloca a etiqueta ANTES do texto, no topo do cartão.
-  cartao.insertBefore(etiqueta, cartao.firstChild);
+  const detalhes = document.createElement("div");
+  detalhes.style.marginTop = "6px";
+  detalhes.innerHTML =
+    "<strong>" + (dados.nome || "Sem nome") + "</strong><br>" +
+    (dados.email || "") + "<br>" +
+    '<span class="texto-ajuda">Cargo: ' + (NOMES_CARGOS[dados.cargo] || dados.cargo || "—") + "<br>" +
+    "Código usado: " + (dados.codigo || "—") + "</span>";
+
+  info.appendChild(detalhes);
+  cartao.appendChild(info);
+
   return cartao;
 }
 
@@ -231,6 +263,7 @@ function criarCartao(dados, textoStatus, classeStatus) {
 // ------------------------------------------------------------
 function criarBotao(texto, classe, acao) {
   const botao = document.createElement("button");
+  botao.type = "button";
   botao.textContent = texto;
   botao.className = classe;
   botao.addEventListener("click", acao);
@@ -239,13 +272,16 @@ function criarBotao(texto, classe, acao) {
 
 // ------------------------------------------------------------
 // FUNÇÃO AUXILIAR: criar um seletor de cargos
-// Monta um <select> com as quatro opções e já pré-marcado
-// com o cargo atual do usuário. Usado na aba Pendentes
-// (na aprovação) e na aba Aprovados (alteração posterior).
 // ------------------------------------------------------------
 function criarSeletorCargo(cargoAtual) {
   const seletor = document.createElement("select");
   seletor.className = "seletor-cargo";
+  seletor.style.height = "32px";
+  seletor.style.padding = "0 8px";
+  seletor.style.borderRadius = "8px";
+  seletor.style.border = "1px solid var(--borda)";
+  seletor.style.fontFamily = "inherit";
+  seletor.style.fontSize = "12px";
 
   CARGOS.forEach((cargo) => {
     const opcao = document.createElement("option");
@@ -254,55 +290,47 @@ function criarSeletorCargo(cargoAtual) {
     seletor.appendChild(opcao);
   });
 
-  // Pré-seleciona o cargo informado (ou "vendas" como padrão
-  // para documentos antigos que não têm o campo cargo).
   seletor.value = cargoAtual || "vendas";
   return seletor;
 }
 
 // ------------------------------------------------------------
 // ABA 1 — PENDENTES (aprovar / rejeitar)
-// Cada cartão traz um SELETOR de cargo, já pré-marcado com o
-// cargo que o candidato escolheu. O admin pode trocar antes
-// de aprovar — inclusive promovendo a Administração, opção
-// que o candidato não teve acesso no cadastro.
 // ------------------------------------------------------------
 function renderizarPendentes() {
   const pendentes = cacheSolicitacoes.filter((s) => s.status === "pendente");
 
   if (pendentes.length === 0) {
-    listaPendentes.innerHTML =
+    listaSolicitacoes.innerHTML =
       '<p class="texto-ajuda">Nenhuma solicitação pendente no momento.</p>';
     return;
   }
 
-  listaPendentes.innerHTML = "";
+  listaSolicitacoes.innerHTML = "";
   pendentes.forEach((solicitacao) => {
     const cartao = criarCartao(solicitacao, "Aguardando decisão", "etiqueta-pendente");
+    const seletor = criarSeletorCargo(solicitacao.cargo);
 
-    cartao.appendChild(criarSeletorCargo(solicitacao.cargo));
+    const acoes = document.createElement("div");
+    acoes.className = "acoes-solicitacao";
+    acoes.appendChild(seletor);
 
-    cartao.appendChild(
+    acoes.appendChild(
       criarBotao("Aprovar", "botao-aprovar", () =>
-        // O seletor é o IRMÃO dentro deste cartão: buscamos ele
-        // no cartão para pegar o valor escolhido na hora do clique.
-        aprovarSolicitacao(solicitacao.id, solicitacao, cartao.querySelector(".seletor-cargo")))
+        aprovarSolicitacao(solicitacao.id, solicitacao, seletor))
     );
-    cartao.appendChild(
+    acoes.appendChild(
       criarBotao("Rejeitar", "botao-rejeitar", () =>
         rejeitarSolicitacao(solicitacao.id, solicitacao))
     );
 
-    listaPendentes.appendChild(cartao);
+    cartao.appendChild(acoes);
+    listaSolicitacoes.appendChild(cartao);
   });
 }
 
 // ------------------------------------------------------------
 // ABA 2 — APROVADOS (alterar cargo / bloquear / excluir / reativar)
-// NOVIDADE: usuários ativos ganham um SELETOR de cargo com o
-// botão "Salvar cargo". É aqui que o administrador promove
-// alguém a Administração (ou rebaixa) DEPOIS da aprovação —
-// compensando a opção ter sido retirada do cadastro.
 // ------------------------------------------------------------
 function renderizarAprovados() {
   const ativos = cacheSolicitacoes.filter((s) =>
@@ -310,83 +338,76 @@ function renderizarAprovados() {
   );
 
   if (ativos.length === 0) {
-    listaAprovados.innerHTML =
+    listaSolicitacoes.innerHTML =
       '<p class="texto-ajuda">Nenhum usuário aprovado ainda.</p>';
     return;
   }
 
-  listaAprovados.innerHTML = "";
+  listaSolicitacoes.innerHTML = "";
   ativos.forEach((solicitacao) => {
+    const acoes = document.createElement("div");
+    acoes.className = "acoes-solicitacao";
 
-    // Usuário ATIVO: pode trocar de cargo, ser bloqueado ou excluído.
     if (solicitacao.status === "aprovada") {
       const cartao = criarCartao(solicitacao, "Ativo", "etiqueta-aprovada");
+      const seletor = criarSeletorCargo(solicitacao.cargo);
+      acoes.appendChild(seletor);
 
-      // Seletor pré-marcado com o cargo atual do usuário.
-      cartao.appendChild(criarSeletorCargo(solicitacao.cargo));
-
-      // Grava o cargo escolhido no seletor direto no banco.
-      cartao.appendChild(
-        criarBotao("Salvar cargo", "botao-reativar", () =>
-          alterarCargo(solicitacao.id, cartao.querySelector(".seletor-cargo")))
+      acoes.appendChild(
+        criarBotao("Salvar cargo", "botao-secundario", () =>
+          alterarCargo(solicitacao.id, seletor))
       );
-      cartao.appendChild(
-        criarBotao("Bloquear", "botao-bloquear", () => bloquearUsuario(solicitacao.id))
+      acoes.appendChild(
+        criarBotao("Bloquear", "botao-rejeitar", () => bloquearUsuario(solicitacao.id))
       );
-      cartao.appendChild(
+      acoes.appendChild(
         criarBotao("Excluir acesso", "botao-rejeitar", () => excluirAcesso(solicitacao.id))
       );
-      listaAprovados.appendChild(cartao);
+      cartao.appendChild(acoes);
+      listaSolicitacoes.appendChild(cartao);
     }
 
-    // BLOQUEADO: só pode ser reativado.
     if (solicitacao.status === "bloqueada") {
-      const cartao = criarCartao(solicitacao, "Bloqueado", "etiqueta-bloqueada");
-      cartao.appendChild(
-        criarBotao("Reativar", "botao-reativar", () => reativarUsuario(solicitacao.id))
+      const cartao = criarCartao(solicitacao, "Bloqueado", "etiqueta-rejeitada");
+      acoes.appendChild(
+        criarBotao("Reativar", "botao-aprovar", () => reativarUsuario(solicitacao.id))
       );
-      listaAprovados.appendChild(cartao);
+      cartao.appendChild(acoes);
+      listaSolicitacoes.appendChild(cartao);
     }
 
-    // ACESSO EXCLUÍDO: só pode ser reativado.
     if (solicitacao.status === "excluida") {
-      const cartao = criarCartao(solicitacao, "Acesso excluído", "etiqueta-excluida");
-      cartao.appendChild(
-        criarBotao("Reativar", "botao-reativar", () => reativarUsuario(solicitacao.id))
+      const cartao = criarCartao(solicitacao, "Acesso excluído", "etiqueta-rejeitada");
+      acoes.appendChild(
+        criarBotao("Reativar", "botao-aprovar", () => reativarUsuario(solicitacao.id))
       );
-      listaAprovados.appendChild(cartao);
+      cartao.appendChild(acoes);
+      listaSolicitacoes.appendChild(cartao);
     }
   });
 }
 
 // ------------------------------------------------------------
 // ABA 3 — REJEITADOS (somente histórico, sem botões)
-// Serve para o administrador saber quem tentou cadastrar.
 // ------------------------------------------------------------
 function renderizarRejeitados() {
   const rejeitados = cacheSolicitacoes.filter((s) => s.status === "rejeitada");
 
   if (rejeitados.length === 0) {
-    listaRejeitados.innerHTML =
+    listaSolicitacoes.innerHTML =
       '<p class="texto-ajuda">Nenhuma solicitação rejeitada ainda.</p>';
     return;
   }
 
-  listaRejeitados.innerHTML = "";
+  listaSolicitacoes.innerHTML = "";
   rejeitados.forEach((solicitacao) => {
-    // Nenhum botão é adicionado: histórico é imutável.
-    listaRejeitados.appendChild(
-      criarCartao(solicitacao, "Rejeitado", "etiqueta-excluida")
-    );
+    const cartao = criarCartao(solicitacao, "Rejeitado", "etiqueta-rejeitada");
+    listaSolicitacoes.appendChild(cartao);
   });
 }
 
 // ------------------------------------------------------------
 // GERAR CÓDIGO DE ADESÃO
-// Sorteia 8 caracteres de um alfabeto SEM letras ambíguas
-// (sem I, O, 0, 1 — que se confundem na leitura). Além de
-// gravar no banco, revela o bloco com o código e o botão de
-// copiar.
 // ------------------------------------------------------------
 function sortearCodigo() {
   const caracteres = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -397,52 +418,52 @@ function sortearCodigo() {
   return codigo;
 }
 
-botaoGerar.addEventListener("click", async () => {
-  botaoGerar.disabled = true;
-  try {
-    const codigo = sortearCodigo();
-    await addDoc(collection(db, "codigosAdesao"), {
-      codigo: codigo,
-      usado: false,
-      criadoEm: serverTimestamp()
-    });
+if (botaoGerar) {
+  botaoGerar.addEventListener("click", async () => {
+    botaoGerar.disabled = true;
+    try {
+      const codigo = sortearCodigo();
+      await addDoc(collection(db, "codigosAdesao"), {
+        codigo: codigo,
+        usado: false,
+        criadoEm: serverTimestamp()
+      });
 
-    // Mostra o código em destaque junto com o botão de copiar.
-    // O parágrafo guarda APENAS o código (sem rótulo), para a
-    // cópia sair limpa.
-    codigoGerado.textContent = codigo;
-    blocoCodigoGerado.style.display = "block";
+      if (areaCodigoGerado) {
+        areaCodigoGerado.innerHTML = `
+          <span class="codigo-gerado" id="codigo-gerado">${codigo}</span>
+          <button type="button" id="botao-copiar-codigo" class="botao-secundario">Copiar código</button>
+        `;
+        areaCodigoGerado.style.display = "block";
 
-  } catch (erro) {
-    mostrarMensagem("Erro ao gerar o código.", "erro");
-  } finally {
-    botaoGerar.disabled = false;
-  }
-});
-
-// ------------------------------------------------------------
-// COPIAR CÓDIGO PARA A ÁREA DE TRANSFERÊNCIA
-// navigator.clipboard.writeText pede ao navegador para copiar
-// o texto. Funciona em endereços seguros — e o Live Server
-// (127.0.0.1) é considerado seguro, então está garantido.
-// ------------------------------------------------------------
-botaoCopiar.addEventListener("click", async () => {
-  try {
-    await navigator.clipboard.writeText(codigoGerado.textContent);
-    botaoCopiar.textContent = "Copiado! ✅";
-    // Volta ao texto normal depois de 2 segundos.
-    setTimeout(() => {
-      botaoCopiar.textContent = "Copiar código";
-    }, 2000);
-  } catch (erro) {
-    mostrarMensagem("Não foi possível copiar. Selecione e use Ctrl+C.", "erro");
-  }
-});
+        const botaoCopiar = document.getElementById("botao-copiar-codigo");
+        if (botaoCopiar) {
+          botaoCopiar.addEventListener("click", async () => {
+            try {
+              await navigator.clipboard.writeText(codigo);
+              botaoCopiar.textContent = "Copiado! ✅";
+              setTimeout(() => {
+                botaoCopiar.textContent = "Copiar código";
+              }, 2000);
+            } catch (erro) {
+              mostrarMensagem("Não foi possível copiar. Selecione e use Ctrl+C.", "erro");
+            }
+          });
+        }
+      }
+    } catch (erro) {
+      mostrarMensagem("Erro ao gerar o código.", "erro");
+    } finally {
+      botaoGerar.disabled = false;
+    }
+  });
+}
 
 // ------------------------------------------------------------
 // ENVIAR E-MAIL DE RESPOSTA (via EmailJS)
 // ------------------------------------------------------------
 function enviarEmail(destinatario, nome, aprovado) {
+  if (typeof emailjs === "undefined") return;
   emailjs.send(
     EMAILJS_SERVICE_ID,
     EMAILJS_TEMPLATE_ID,
@@ -464,21 +485,11 @@ function enviarEmail(destinatario, nome, aprovado) {
 
 // ------------------------------------------------------------
 // APROVAR SOLICITAÇÃO
-// Caso 1 (normal): cria a conta de verdade no Firebase e grava
-// o cargo ESCOLHIDO NO SELETOR (não o pedido pelo candidato).
-// Caso 2 (e-mail já tem conta): acontece quando o usuário foi
-// bloqueado/excluído e tentou se cadastrar de novo. A conta já
-// existe no Firebase, então não há o que criar — basta mudar
-// o status no banco para "aprovada", o que reativa o acesso.
-// OBSERVAÇÃO: no caso 2, a senha válida é a do cadastro
-// ANTERIOR (o Firebase não permite trocar a senha por aqui).
 // ------------------------------------------------------------
 async function aprovarSolicitacao(id, dados, seletorCargo) {
-  // O cargo vem do seletor da tela, não do pedido do candidato.
   const cargoEscolhido = seletorCargo.value;
 
   try {
-    // Tentativa normal: criar a conta nova.
     await createUserWithEmailAndPassword(authSecundario, dados.email, dados.senha);
     await signOut(authSecundario);
 
@@ -491,11 +502,8 @@ async function aprovarSolicitacao(id, dados, seletorCargo) {
     mostrarMensagem("Conta criada e e-mail de liberação enviado.", "sucesso");
 
   } catch (erro) {
-
-    // CASO 2 — o e-mail já possui conta no Firebase.
     if (erro.code === "auth/email-already-in-use") {
       try {
-        // Reativa o acesso apenas atualizando o status no banco.
         await updateDoc(doc(db, "solicitacoes", id), {
           status: "aprovada",
           cargo: cargoEscolhido,
@@ -510,10 +518,9 @@ async function aprovarSolicitacao(id, dados, seletorCargo) {
       } catch (erroInterno) {
         mostrarMensagem("Erro ao reativar o acesso.", "erro");
       }
-      return; // encerra aqui: não é um erro de verdade
+      return;
     }
 
-    // Qualquer outro erro continua sendo reportado.
     mostrarMensagem("Erro ao aprovar a solicitação.", "erro");
   }
 }
@@ -536,10 +543,6 @@ async function rejeitarSolicitacao(id, dados) {
 
 // ------------------------------------------------------------
 // ALTERAR CARGO DE USUÁRIO ATIVO
-// Grava o cargo escolhido no seletor. O efeito é IMEDIATO na
-// próxima sessão do usuário: ele passa a ver as aplicações do
-// cargo novo na home. Se rebaixado de "administracao", perde
-// o acesso a este painel (a proteção consulta o cargo no banco).
 // ------------------------------------------------------------
 async function alterarCargo(id, seletorCargo) {
   try {
@@ -554,8 +557,7 @@ async function alterarCargo(id, seletorCargo) {
 }
 
 // ------------------------------------------------------------
-// BLOQUEAR: o usuário continua existindo, mas o login.js
-// recusará a entrada dele enquanto o status for "bloqueada".
+// BLOQUEAR
 // ------------------------------------------------------------
 async function bloquearUsuario(id) {
   try {
@@ -570,9 +572,7 @@ async function bloquearUsuario(id) {
 }
 
 // ------------------------------------------------------------
-// EXCLUIR ACESSO: marca como "excluida". O efeito para o
-// usuário é o mesmo do bloqueio (login recusado); a diferença
-// é apenas a etiqueta que o administrador vê no painel.
+// EXCLUIR ACESSO
 // ------------------------------------------------------------
 async function excluirAcesso(id) {
   try {
@@ -587,8 +587,7 @@ async function excluirAcesso(id) {
 }
 
 // ------------------------------------------------------------
-// REATIVAR: devolve o status "aprovada", liberando o login
-// novamente (o login.js só bloqueia quem está bloqueado/excluído).
+// REATIVAR
 // ------------------------------------------------------------
 async function reativarUsuario(id) {
   try {
@@ -605,7 +604,9 @@ async function reativarUsuario(id) {
 // ------------------------------------------------------------
 // SAIR (logout)
 // ------------------------------------------------------------
-botaoSair.addEventListener("click", async () => {
-  await signOut(auth);
-  window.location.href = "index.html";
-});
+if (botaoSair) {
+  botaoSair.addEventListener("click", async () => {
+    await signOut(auth);
+    window.location.href = "index.html";
+  });
+}

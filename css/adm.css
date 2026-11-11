@@ -1,0 +1,221 @@
+/* ============================================================
+   PROJETO GOLDEN — Estilos do Painel do Administrador
+   Depende de css/layout-base.css.
+   ============================================================ */
+
+.bloco-adm {
+  margin-bottom: 16px;
+}
+
+.bloco-adm h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.2px;
+}
+
+.desc-adm {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  color: var(--texto-sec);
+  line-height: 1.55;
+}
+
+.area-codigo {
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: #f7f9fc;
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+}
+
+.codigo-gerado {
+  font-family: "SF Mono", "Courier New", monospace;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: var(--navy);
+  display: block;
+  margin-bottom: 8px;
+}
+
+.abas-adm {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.aba-adm {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--borda);
+  border-radius: 9px;
+  background: var(--branco);
+  color: #5a6b85;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  font-family: inherit;
+}
+
+.aba-adm:hover {
+  background: #f7f9fc;
+}
+
+.aba-adm.ativa {
+  background: var(--azul-claro);
+  border-color: #cfe0f8;
+  color: var(--azul);
+  font-weight: 700;
+}
+
+.cartao-solicitacao {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: #fafbfd;
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  margin-bottom: 9px;
+  flex-wrap: wrap;
+}
+
+.info-solicitacao {
+  flex: 1;
+  min-width: 200px;
+  font-size: 13px;
+  color: #5a6b85;
+  line-height: 1.55;
+}
+
+.info-solicitacao strong {
+  color: var(--navy);
+  font-weight: 800;
+}
+
+.acoes-solicitacao {
+  display: flex;
+  gap: 8px;
+}
+
+.botao-aprovar {
+  height: 32px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  background: #2e9e5b;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.botao-aprovar:hover {
+  background: #268049;
+}
+
+.botao-rejeitar {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid #f0c9c4;
+  border-radius: 8px;
+  background: #fff;
+  color: #c0392b;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.botao-rejeitar:hover {
+  background: #fdecea;
+}
+
+.etiqueta-status {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.etiqueta-pendente { background: #eaf1fc; color: #2a5298; }
+.etiqueta-aprovada { background: #e3f6ea; color: #1e7e34; }
+.etiqueta-rejeitada { background: #fdecea; color: #b3261e; }
+
+.texto-ajuda {
+  font-size: 12.5px;
+  color: var(--texto-sec);
+  line-height: 1.55;
+}
+
+.mensagem {
+  margin-top: 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.mensagem.sucesso { color: #1e7e34; }
+.mensagem.erro { color: #c0392b; }
+
+
+body.tema-escuro .bloco-adm h2 {
+  color: #e8edf5;
+}
+
+body.tema-escuro .desc-adm {
+  color: #8a99b0;
+}
+
+body.tema-escuro .area-codigo {
+  background: #1e2c44;
+  border-color: #263449;
+}
+
+body.tema-escuro .codigo-gerado {
+  color: #e8edf5;
+}
+
+body.tema-escuro .aba-adm {
+  background: #182234;
+  border-color: #263449;
+  color: #8a99b0;
+}
+
+body.tema-escuro .aba-adm:hover {
+  background: #22304a;
+}
+
+body.tema-escuro .aba-adm.ativa {
+  background: #1e2c44;
+  border-color: #2d3f5c;
+  color: #6b9ae8;
+}
+
+body.tema-escuro .cartao-solicitacao {
+  background: #1e2c44;
+  border-color: #263449;
+}
+
+body.tema-escuro .info-solicitacao {
+  color: #8a99b0;
+}
+
+body.tema-escuro .info-solicitacao strong {
+  color: #e8edf5;
+}
+
+body.tema-escuro .botao-rejeitar {
+  background: #182234;
+  border-color: #4a2e2b;
+  color: #e07a6e;
+}

@@ -1,0 +1,425 @@
+/* ============================================================
+   PROJETO GOLDEN — Estilos da página de Configurações
+   Compacto, elegante e perfeitamente ajustado na tela sem rolagem.
+   ============================================================ */
+
+.conteudo-config-compacto {
+  padding: 16px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  height: calc(100vh - 60px);
+  box-sizing: border-box;
+}
+
+.cabecalho-config-compacto {
+  margin-bottom: 2px;
+  text-align: left;
+}
+
+.cabecalho-config-compacto > div {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.cabecalho-config-compacto .titulo-pagina {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 2px;
+  text-align: left;
+}
+
+.cabecalho-config-compacto .subtitulo-pagina {
+  font-size: 12.5px;
+  color: var(--texto-sec);
+  margin: 0;
+  text-align: left;
+}
+
+/* Grade de cards compactos lado a lado */
+.grade-config-compacta {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  max-width: 860px;
+  width: 100%;
+}
+
+.card-config-box {
+  background: var(--branco);
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 2px 8px rgba(22, 35, 61, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-sizing: border-box;
+}
+
+.card-config-topo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.icone-card-config {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #3b82f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.titulo-card-config {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--texto);
+  letter-spacing: -0.2px;
+}
+
+.desc-card-config {
+  margin: 1px 0 0;
+  font-size: 11.5px;
+  color: var(--texto-sec);
+}
+
+/* Lista horizontal de opções */
+.opcoes-config {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+/* Forçar reset de button do style.css que tinha width: 100% */
+.opcoes-config .opcao-config {
+  width: auto !important;
+  flex: 1;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--borda);
+  border-radius: 10px;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.opcoes-config .opcao-config:hover {
+  transform: translateY(-2px);
+  border-color: #93c5fd;
+  background: #ffffff;
+}
+
+.opcoes-config .opcao-config.selecionada {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+}
+
+/* Preview de Tema */
+.preview-tema {
+  width: 52px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--borda);
+  display: block;
+}
+
+.preview-claro {
+  background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.preview-escuro {
+  background: linear-gradient(135deg, #182234 0%, #0c131f 100%);
+  border-color: #334155;
+}
+
+/* Amostra de Fonte */
+.amostra-fonte {
+  color: var(--texto);
+  font-weight: 800;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+}
+
+.amostra-pequena { font-size: 13.5px; }
+.amostra-normal { font-size: 16.5px; }
+.amostra-grande { font-size: 20px; }
+
+.nome-opcao {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.opcoes-config .opcao-config.selecionada .nome-opcao {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+/* Banner de Informações no Rodapé */
+.card-info-config-rodape {
+  background: #f8fafc;
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  padding: 9px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 860px;
+  width: 100%;
+  font-size: 12px;
+  color: var(--texto-sec);
+  box-sizing: border-box;
+}
+
+.info-config-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ponto-status-ativo {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 5px rgba(34, 197, 94, 0.45);
+}
+
+.tag-versao {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--borda);
+}
+
+/* ---------- TEMA ESCURO ---------- */
+body.tema-escuro .card-config-box {
+  background: #182234;
+  border-color: #263449;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+body.tema-escuro .icone-card-config {
+  background: #24354e;
+  color: #60a5fa;
+}
+
+body.tema-escuro .titulo-card-config {
+  color: #f1f5f9;
+}
+
+body.tema-escuro .desc-card-config {
+  color: #8c9cb3;
+}
+
+body.tema-escuro .opcoes-config .opcao-config {
+  background: #141d2c;
+  border-color: #263449;
+}
+
+body.tema-escuro .opcoes-config .opcao-config:hover {
+  border-color: #3b82f6;
+  background: #1b263b;
+}
+
+body.tema-escuro .opcoes-config .opcao-config.selecionada {
+  border-color: #60a5fa;
+  background: #1e2c44;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2);
+}
+
+body.tema-escuro .amostra-fonte {
+  color: #f1f5f9;
+}
+
+body.tema-escuro .nome-opcao {
+  color: #8c9cb3;
+}
+
+body.tema-escuro .opcoes-config .opcao-config.selecionada .nome-opcao {
+  color: #93c5fd;
+}
+
+body.tema-escuro .card-info-config-rodape {
+  background: #182234;
+  border-color: #263449;
+  color: #8c9cb3;
+}
+
+body.tema-escuro .tag-versao {
+  background: #24354e;
+  border-color: #2d4160;
+  color: #94a3b8;
+}
+
+/* Card de Atualizações da Versão */
+.card-atualizacoes-versao {
+  background: var(--branco);
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  padding: 14px 18px;
+  box-shadow: 0 2px 8px rgba(22, 35, 61, 0.04);
+  max-width: 860px;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.atualizacoes-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--borda);
+}
+
+.atualizacoes-titulo-bloco {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.icone-atualizacoes {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #3b82f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.titulo-atualizacoes {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--texto);
+  letter-spacing: -0.2px;
+}
+
+.subtitulo-atualizacoes {
+  margin: 1px 0 0;
+  font-size: 11.5px;
+  color: var(--texto-sec);
+}
+
+.badge-atualizacoes-recente {
+  font-size: 11px;
+  font-weight: 700;
+  color: #15803d;
+  background: #dcfce7;
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid #bbf7d0;
+  white-space: nowrap;
+}
+
+.grade-novidades {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px 18px;
+}
+
+.item-novidade {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.ponto-novidade {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3b82f6;
+  margin-top: 5px;
+  flex-shrink: 0;
+  box-shadow: 0 0 5px rgba(59, 130, 246, 0.5);
+}
+
+.titulo-item-novidade {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--texto);
+  margin-bottom: 1px;
+}
+
+.desc-item-novidade {
+  margin: 0;
+  font-size: 11px;
+  color: var(--texto-sec);
+  line-height: 1.35;
+}
+
+/* Tema escuro para card de atualizações */
+body.tema-escuro .card-atualizacoes-versao {
+  background: #182234;
+  border-color: #263449;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+body.tema-escuro .atualizacoes-topo {
+  border-bottom-color: #263449;
+}
+
+body.tema-escuro .icone-atualizacoes {
+  background: #24354e;
+  color: #60a5fa;
+}
+
+body.tema-escuro .titulo-atualizacoes {
+  color: #f1f5f9;
+}
+
+body.tema-escuro .subtitulo-atualizacoes {
+  color: #8c9cb3;
+}
+
+body.tema-escuro .badge-atualizacoes-recente {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+body.tema-escuro .ponto-novidade {
+  background: #60a5fa;
+  box-shadow: 0 0 5px rgba(96, 165, 250, 0.6);
+}
+
+body.tema-escuro .titulo-item-novidade {
+  color: #e2e8f0;
+}
+
+body.tema-escuro .desc-item-novidade {
+  color: #8c9cb3;
+}

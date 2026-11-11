@@ -1,261 +1,133 @@
 /* ============================================================
-   PROJETO GOLDEN — Estilos exclusivos do módulo de Estoque
-   VERSÃO CONSOLIDADA — fonte única de verdade.
-   Cada seletor aparece UMA ÚNICA VEZ neste arquivo. Se precisar
-   alterar algum estilo no futuro, edite aqui — nunca cole blocos
-   duplicados no fim do arquivo (a última regra vence e causa
-   conflitos de alinhamento).
+   PROJETO GOLDEN — Estilos do módulo de Estoque
+   Depende de css/layout-base.css (sidebar, header, modal,
+   botões, painéis). Aqui ficam apenas tabela, formulários,
+   histórico e gerenciador de categorias.
    ============================================================ */
 
-/* ---------- RESET: desfaz o estilo de login no body ---------- */
-body {
-  display: block;
-  justify-content: initial;
-  align-items: initial;
-  min-height: initial;
-  margin: 0;
-  background: #f4f6fa;
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-/* Conteúdo escondido até a verificação de cargo passar */
-.oculto { display: none; }
-
-/* ---------- CABEÇALHO (compacto) ---------- */
-.cabecalho-modulo {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: #1e3c72;
-  color: #fff;
-  padding: 8px 20px;
-}
-
-/* Saudação à esquerda: "Logado como Fulano" */
-.saudacao-header {
-  font-size: 14px;
-  color: #cdd8ee;
-}
-
-.saudacao-header strong {
-  color: #fff;
-}
-
-/* Grupo de ações à direita: voltar + perfil */
-.acoes-cabecalho {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-/* Botões redondos do cabeçalho (voltar e avatar).
-   flex + width/height + aspect-ratio travam a forma: círculo
-   perfeito, imune a esticamentos. */
-.botao-icone-header {
-  flex: 0 0 36px;
-  width: 36px;
-  height: 36px;
-  aspect-ratio: 1 / 1;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  line-height: 1;
-  background: rgba(255,255,255,0.12);
-  border: none;
-  border-radius: 50%;
-  font-size: 16px;
-  cursor: pointer;
-  color: #fff;
-}
-
-.botao-icone-header:hover { background: rgba(255,255,255,0.25); }
-
-/* Avatar com a inicial do usuário */
-.avatar-header {
-  font-weight: 700;
-  font-size: 15px;
-}
-
-/* Wrapper do perfil: referência para o menu flutuante */
-.perfil-wrapper {
-  position: relative;
-}
-
-/* ---------- MENUS FLUTUANTES (perfil e sanduíche) ---------- */
-.menu-flutuante {
-  position: absolute;
-  top: 44px;
-  right: 0;
-  width: 190px;
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
-  padding: 6px;
-  display: none;          /* escondido por padrão */
-  z-index: 200;
-}
-
-/* A classe .aberta (controlada pelo JS) revela o menu */
-.menu-flutuante.aberta { display: block; }
-
-.item-menu-perfil {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 10px 12px;
-  border-radius: 6px;
-  font-size: 14px;
-  color: #333;
-  cursor: pointer;
-}
-
-.item-menu-perfil:hover { background: #f0f4fa; }
-
-/* Opção "Sair" em tom de alerta */
-.item-sair { color: #b3261e; }
-
-/* ---------- LAYOUT EM DUAS COLUNAS ---------- */
-/* Menu lateral fixo de 200px + conteúdo que ocupa o resto */
-.layout-estoque {
-  display: flex;
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 20px;
-  gap: 20px;
-  align-items: flex-start;
-}
-
-/* ---------- MENU LATERAL ESQUERDO ---------- */
-.menu-lateral {
-  flex: 0 0 200px;
-  background: #fff;
-  border: 1px solid #e3e8f0;
-  border-radius: 12px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  position: sticky;   /* acompanha a rolagem, colado no topo */
-  top: 20px;
-}
-
-/* Cada opção do menu */
-.item-menu {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 12px 14px;
-  border-radius: 8px;
-  font-size: 14px;
-  color: #333;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.item-menu:hover { background: #f0f4fa; }
-
-/* Opção ativa: fundo azul, texto branco */
-.item-menu.ativo {
-  background: #1e3c72;
-  color: #fff;
-  font-weight: 600;
-}
-
-/* ---------- ÁREA DE CONTEÚDO (painéis) ---------- */
-.area-conteudo {
-  flex: 1;
-  min-width: 0;   /* permite a tabela encolher sem estourar */
-}
-
+/* ---------- PAINÉIS ---------- */
 .painel {
-  display: none;          /* todos os painéis começam ocultos */
-  background: #fff;
-  border: 1px solid #e3e8f0;
-  border-radius: 12px;
-  padding: 20px;
+  display: none;
 }
 
-/* Apenas o painel da opção ativa aparece */
-.painel.visivel { display: block; }
+.painel.visivel {
+  display: block;
+}
 
 .painel h2 {
-  margin: 0 0 12px;
-  font-size: 17px;
-  color: #1e3c72;
+  margin: 0 0 14px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #16233d;
+  letter-spacing: -0.2px;
 }
 
-/* Três campos lado a lado no cadastro */
+/* ---------- FORMULÁRIOS ---------- */
+#form-produto label,
+.form-movimento label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #5a6b85;
+  margin: 14px 0 5px;
+}
+
+#form-produto label:first-child,
+.form-movimento label:first-child {
+  margin-top: 0;
+}
+
+#form-produto input,
+#form-produto select,
+.form-movimento input,
+.form-movimento select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #dde3ec;
+  border-radius: 9px;
+  font-size: 13px;
+  color: #16233d;
+  background: #ffffff;
+  box-sizing: border-box;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+#form-produto input:focus,
+#form-produto select:focus,
+.form-movimento input:focus,
+.form-movimento select:focus {
+  border-color: #4a7bd4;
+  box-shadow: 0 0 0 3px rgba(74, 123, 212, 0.12);
+}
+
+#form-produto input[type="file"] {
+  padding: 8px 10px;
+  background: #f7f9fc;
+}
+
 .linha-campos {
   display: flex;
   gap: 12px;
+  margin-top: 4px;
 }
 
 .linha-campos > div {
   flex: 1;
+  min-width: 0;
 }
 
-/* ============================================================
-   BARRA DE CONTROLES DA TABELA — BLOCO ÚNICO
-   Proporção: busca 60% · ordenador 25% · sanduíche 15%.
-   O truque é flex-grow PROPORCIONAL (60/25/15) com flex-basis
-   0%: o navegador divide o espaço sobrado depois do gap
-   exatamente nessa proporção — a soma fecha em 100% da linha
-   mesmo com o gap entre os elementos.
-   Altura única de 40px nos três (box-sizing:border-box faz o
-   padding entrar dentro dos 40px) — elimina o efeito "escada".
-   ============================================================ */
-/* ============================================================
-   BARRA DE CONTROLES DA TABELA — v5.3 (alinhamento à prova de
-   navegador). O segredo: align-items: STRETCH no container.
-   Com stretch, os três filhos são ESTICADOS para a mesma
-   altura automaticamente — o navegador não pode mais renderizar
-   o <select> menor que a busca, mesmo com suas peculiaridades
-   nativas de renderização.
-   ============================================================ */
+#form-produto .botao-primario,
+.form-movimento .botao-primario {
+  margin-top: 18px;
+}
+
+/* ---------- BARRA DE CONTROLES DA TABELA ---------- */
 .controles-tabela {
   display: flex;
   gap: 10px;
-  align-items: stretch;      /* ← a correção principal */
+  align-items: stretch;
   margin-bottom: 14px;
 }
 
-/* Busca: 60% da linha. A altura de referência é 40px. */
 .controles-tabela .campo-busca-interno {
   flex: 60 1 0%;
   min-width: 0;
-  height: 40px;
+  height: 38px;
   box-sizing: border-box;
   margin-bottom: 0;
   padding: 0 12px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 14px;
+  border: 1px solid #dde3ec;
+  border-radius: 9px;
+  font-size: 13px;
+  color: #16233d;
+  background: #ffffff;
+  outline: none;
 }
 
-/* Seletor "Ordenar por": 25% da linha.
-   line-height IGUAL à altura centraliza o texto na vertical —
-   é isso que elimina a sensação de "deslocado para cima". */
+.controles-tabela .campo-busca-interno:focus {
+  border-color: #4a7bd4;
+  box-shadow: 0 0 0 3px rgba(74, 123, 212, 0.12);
+}
+
 .seletor-ordenacao {
   flex: 25 1 0%;
   min-width: 0;
-  height: 40px;
+  height: 38px;
   box-sizing: border-box;
   padding: 0 10px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 14px;
-  background: #fff;
-  line-height: 38px;         /* 40px menos as 2 bordas */
-  vertical-align: middle;
+  border: 1px solid #dde3ec;
+  border-radius: 9px;
+  font-size: 13px;
+  color: #16233d;
+  background: #ffffff;
+  outline: none;
+  cursor: pointer;
 }
 
-/* Sanduíche: 15% da linha */
 .sanduiche-wrapper {
   flex: 15 1 0%;
   position: relative;
@@ -264,165 +136,252 @@ body {
 
 .botao-sanduiche {
   width: 100%;
-  height: 40px;
+  height: 38px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
   line-height: 1;
   padding: 0;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  background: #fff;
-  font-size: 18px;
+  border: 1px solid #dde3ec;
+  border-radius: 9px;
+  background: #ffffff;
+  font-size: 16px;
   cursor: pointer;
-  color: #1e3c72;
+  color: #5a6b85;
+  transition: background 0.15s;
 }
 
-.botao-sanduiche:hover { background: #f0f4fa; }
+.botao-sanduiche:hover {
+  background: #f7f9fc;
+  color: #16233d;
+}
 
-/* Menu do sanduíche ancorado no canto direito do botão */
+/* ---------- MENUS FLUTUANTES ---------- */
+.menu-flutuante {
+  position: absolute;
+  top: 44px;
+  right: 0;
+  width: 200px;
+  background: #ffffff;
+  border: 1px solid #e6ebf3;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(22, 35, 61, 0.14);
+  padding: 6px;
+  display: none;
+  z-index: 200;
+}
+
+.menu-flutuante.aberta {
+  display: block;
+}
+
 .menu-tabela {
-  top: 46px;
+  top: 44px;
   right: 0;
 }
 
-/* ---------- TABELA DE PRODUTOS ---------- */
-/* wrapper com rolagem horizontal: em telas estreitas, a tabela
-   rola para os lados em vez de quebrar o layout */
+.item-menu-perfil {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 9px 11px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: #5a6b85;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.item-menu-perfil:hover {
+  background: #f7f9fc;
+  color: #16233d;
+}
+
+.item-sair {
+  color: #c0392b;
+}
+
+/* ---------- TABELA ---------- */
 .wrapper-tabela {
   overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid #e6ebf3;
 }
 
 .tabela-produtos {
   width: 100%;
-  border-collapse: collapse;   /* remove o espaço entre bordas */
-  font-size: 14px;
+  border-collapse: collapse;
+  font-size: 13px;
 }
 
 .tabela-produtos th {
-  background: #1e3c72;
-  color: #fff;
+  background: #f7f9fc;
+  color: #5a6b85;
   text-align: left;
-  padding: 10px 12px;
-  font-size: 13px;
+  padding: 11px 12px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
   white-space: nowrap;
+  border-bottom: 1px solid #e6ebf3;
 }
 
-/* Linhas zebradas: linhas pares ganham fundo levemente cinza */
-.tabela-produtos tbody tr:nth-child(even) {
-  background: #f7f9fc;
+.tabela-produtos tbody tr {
+  transition: background 0.12s;
+}
+
+.tabela-produtos tbody tr:hover {
+  background: #fafbfd;
 }
 
 .tabela-produtos td {
   padding: 10px 12px;
-  border-bottom: 1px solid #e9eef5;
+  border-bottom: 1px solid #f0f3f8;
   vertical-align: middle;
+  color: #16233d;
 }
 
-/* Código em fonte monoespaçada (padrão NN.NNN-XX alinha melhor) */
+.tabela-produtos tbody tr:last-child td {
+  border-bottom: none;
+}
+
 .celula-codigo {
-  font-family: "Courier New", monospace;
+  font-family: "SF Mono", "Courier New", monospace;
   font-weight: 700;
-  color: #1e3c72;
+  color: #16233d;
   white-space: nowrap;
+  font-size: 12.5px;
 }
 
-/* Miniatura da foto na tabela */
 .foto-produto {
-  width: 44px;
-  height: 44px;
-  object-fit: cover;      /* preenche o quadrado sem distorcer */
-  border-radius: 8px;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 9px;
   display: block;
 }
 
-/* Símbolo quando o produto não tem foto */
 .foto-vazia {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
-  background: #eef2f8;
-  font-size: 18px;
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  background: #f2f5fa;
+  font-size: 16px;
 }
 
-/* Botão de três pontinhos (menu de opções do produto) */
-.botao-tres-pontos {
-  background: none;
-  border: none;
-  font-size: 20px;
-  font-weight: 700;
-  color: #666;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-  line-height: 1;
-}
-
-.botao-tres-pontos:hover {
-  background: #eef2f8;
-  color: #1e3c72;
-}
-
-/* ---------- ETIQUETA DE CATEGORIA NA TABELA ---------- */
-/* Fundo colorido pastel (cor vem do JS via style inline) */
 .etiqueta-categoria {
   display: inline-block;
   padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #333;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #16233d;
   white-space: nowrap;
 }
 
-/* ---------- FOTO: PRÉ-VISUALIZAÇÃO NO CADASTRO/EDIÇÃO ---------- */
+/* ---------- FOTO: PRÉ-VISUALIZAÇÃO ---------- */
 .preview-foto {
-  width: 120px;
-  height: 120px;
+  width: 110px;
+  height: 110px;
   object-fit: cover;
-  border-radius: 10px;
-  border: 1px solid #e3e8f0;
-  margin-bottom: 12px;
+  border-radius: 12px;
+  border: 1px solid #e6ebf3;
+  margin-top: 10px;
   display: block;
 }
 
-/* ---------- HISTÓRICO DE MOVIMENTAÇÕES ---------- */
-.cartao-movimento {
-  background: #fafbfd;
-  border: 1px solid #e3e8f0;
-  border-left: 5px solid #ccc;   /* cor muda conforme o tipo */
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 10px;
-  font-size: 14px;
+/* ---------- HISTÓRICO ---------- */
+.controles-historico {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin-bottom: 14px;
 }
 
-/* Borda esquerda verde = entrada no estoque */
-.movimento-entrada { border-left-color: #1e7e34; }
+.campo-busca-historico {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid #dde3ec;
+  border-radius: 9px;
+  font-size: 13px;
+  color: #16233d;
+  background: #ffffff;
+  outline: none;
+}
 
-/* Borda esquerda âmbar = saída do estoque */
-.movimento-saida { border-left-color: #c77c02; }
+.campo-busca-historico:focus {
+  border-color: #4a7bd4;
+  box-shadow: 0 0 0 3px rgba(74, 123, 212, 0.12);
+}
 
-/* Borda azul = evento de edição */
-.movimento-edicao { border-left-color: #2a5298; }
+.seletor-filtro-historico {
+  flex: 0 0 160px;
+  height: 38px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid #dde3ec;
+  border-radius: 9px;
+  font-size: 13px;
+  color: #16233d;
+  background: #ffffff;
+  outline: none;
+  cursor: pointer;
+}
 
-/* Borda vermelha = exclusão */
-.movimento-exclusao { border-left-color: #b3261e; }
+.cartao-movimento {
+  background: #fafbfd;
+  border: 1px solid #e6ebf3;
+  border-left: 4px solid #ccc;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 9px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #5a6b85;
+}
+
+.cartao-movimento strong {
+  color: #16233d;
+}
+
+.movimento-entrada { border-left-color: #2e9e5b; }
+.movimento-saida { border-left-color: #d99a2b; }
+.movimento-edicao { border-left-color: #4a7bd4; }
+.movimento-exclusao { border-left-color: #c0392b; }
+
+.etiqueta-status {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin-right: 7px;
+}
+
+.etiqueta-aprovada { background: #e3f6ea; color: #1e7e34; }
+.etiqueta-bloqueada { background: #fdf1dc; color: #a86a00; }
+.etiqueta-pendente { background: #eaf1fc; color: #2a5298; }
+.etiqueta-excluida { background: #fdecea; color: #b3261e; }
 
 /* ---------- MENU DE OPÇÕES (três pontinhos) ---------- */
-/* position:fixed + coordenadas calculadas via JS: o menu
-   "gruda" na posição exata do botão clicado, mesmo rolando
-   a página. z-index alto garante que fique sobre a tabela. */
 .menu-opcoes {
   position: fixed;
-  background: #fff;
-  border: 1px solid #e3e8f0;
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  background: #ffffff;
+  border: 1px solid #e6ebf3;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(22, 35, 61, 0.16);
   padding: 6px;
   min-width: 200px;
   z-index: 300;
@@ -437,108 +396,75 @@ body {
   text-align: left;
   background: none;
   border: none;
-  padding: 10px 12px;
-  border-radius: 6px;
-  font-size: 14px;
-  color: #333;
-  cursor: pointer;
-}
-
-.item-opcao:hover { background: #f0f4fa; }
-
-/* Opção destrutiva (Excluir) em vermelho */
-.opcao-perigosa { color: #b3261e; }
-.opcao-perigosa:hover { background: #fdecea; }
-
-/* ---------- MODAL GENÉRICO ---------- */
-/* Overlay escuro cobrindo a tela inteira; flex centraliza a
-   caixa branca. O JS alterna display:none/flex. */
-.modal-overlay {
-  position: fixed;
-  inset: 0;                    /* cobre a tela toda */
-  background: rgba(0,0,0,0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 400;
-  padding: 16px;
-}
-
-/* Caixa branca do modal, com rolagem própria quando o
-   conteúdo é maior que a tela (max-height + overflow) */
-.modal-conteudo {
-  background: #fff;
-  border-radius: 14px;
-  padding: 24px;
-  width: 100%;
-  max-width: 520px;
-  max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: 0 16px 48px rgba(0,0,0,0.3);
-}
-
-/* Conteúdo interno padrão dos modais */
-.modal-interno h3 {
-  margin: 0 0 14px;
-  color: #1e3c72;
-  font-size: 17px;
-}
-
-.modal-interno label {
-  display: block;
-  margin: 12px 0 4px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #444;
-}
-
-.modal-interno input,
-.modal-interno select {
-  width: 100%;
-  padding: 9px 10px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 14px;
-  box-sizing: border-box;
-}
-
-/* Bloco de informações somente leitura (fundo cinza) */
-.bloco-somente-leitura {
-  background: #f4f6fa;
-  border: 1px solid #e3e8f0;
+  padding: 9px 11px;
   border-radius: 8px;
-  padding: 12px 14px;
-  margin-top: 16px;
-  font-size: 13px;
+  font-size: 12.5px;
+  color: #5a6b85;
+  cursor: pointer;
+  font-family: inherit;
 }
 
-.bloco-somente-leitura p { margin: 4px 0; }
+.item-opcao:hover {
+  background: #f7f9fc;
+  color: #16233d;
+}
 
-/* Botões dentro do modal */
+.opcao-perigosa {
+  color: #c0392b;
+}
+
+.opcao-perigosa:hover {
+  background: #fdecea;
+}
+
+/* ---------- MODAL: CONTEÚDO INTERNO ---------- */
+.bloco-somente-leitura {
+  background: #f7f9fc;
+  border: 1px solid #e6ebf3;
+  border-radius: 10px;
+  padding: 13px 15px;
+  margin-top: 16px;
+  font-size: 12.5px;
+  color: #5a6b85;
+  line-height: 1.6;
+}
+
+.bloco-somente-leitura p {
+  margin: 4px 0;
+}
+
+.bloco-somente-leitura strong {
+  color: #16233d;
+}
+
 .botao-modal {
   padding: 10px 16px;
   border: none;
-  border-radius: 6px;
-  background: #1e3c72;
+  border-radius: 9px;
+  background: #4a7bd4;
   color: #fff;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 700;
   cursor: pointer;
   margin-top: 14px;
+  font-family: inherit;
+  transition: background 0.15s;
 }
 
-.botao-modal:hover { background: #16305a; }
+.botao-modal:hover {
+  background: #3a68c0;
+}
 
-/* Botão secundário (Cancelar/Sair/Fechar): contorno, sem preenchimento */
 .botao-modal-secundario {
-  background: none;
-  border: 1px solid #ccc;
-  color: #444;
+  background: #ffffff;
+  border: 1px solid #dde3ec;
+  color: #5a6b85;
 }
 
-.botao-modal-secundario:hover { background: #f0f4fa; }
+.botao-modal-secundario:hover {
+  background: #f7f9fc;
+}
 
-/* Linha que alinha Sair (esquerda) e Salvar (direita) */
 .linha-botoes-modal {
   display: flex;
   justify-content: space-between;
@@ -546,25 +472,28 @@ body {
   margin-top: 18px;
 }
 
-.linha-botoes-modal .botao-modal { margin-top: 0; }
-
-/* Foto grande no modal de detalhes */
-.foto-detalhes {
-  width: 100%;
-  max-width: 240px;
-  border-radius: 10px;
-  display: block;
-  margin-bottom: 12px;
+.linha-botoes-modal .botao-modal {
+  margin-top: 0;
 }
 
-/* Lista de últimos movimentos nos detalhes */
+.foto-detalhes {
+  width: 100%;
+  max-width: 220px;
+  border-radius: 12px;
+  display: block;
+  margin-bottom: 14px;
+}
+
 .lista-detalhes {
   margin: 6px 0 0;
   padding-left: 18px;
-  font-size: 13px;
+  font-size: 12.5px;
+  color: #5a6b85;
 }
 
-.lista-detalhes li { margin-bottom: 4px; }
+.lista-detalhes li {
+  margin-bottom: 4px;
+}
 
 /* ---------- GERENCIADOR DE CATEGORIAS ---------- */
 .cartao-categoria {
@@ -572,94 +501,255 @@ body {
   align-items: center;
   gap: 12px;
   background: #fafbfd;
-  border: 1px solid #e3e8f0;
-  border-radius: 10px;
+  border: 1px solid #e6ebf3;
+  border-radius: 12px;
   padding: 12px 14px;
-  margin-bottom: 10px;
+  margin-bottom: 9px;
 }
 
-/* Bloquinho da cor de identificação */
 .bloco-cor {
-  flex: 0 0 36px;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  border: 1px solid rgba(0,0,0,0.08);
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .info-categoria {
   flex: 1;
-  font-size: 14px;
+  font-size: 13px;
+  color: #16233d;
+  line-height: 1.5;
 }
 
-/* ---------- PALETA DE CORES (edição de categoria) ---------- */
+.info-categoria strong {
+  font-weight: 800;
+}
+
+/* ---------- PALETA DE CORES ---------- */
 .paleta-cores {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);  /* 2 linhas de 6 cores */
+  grid-template-columns: repeat(6, 1fr);
   gap: 8px;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .cor-opcao {
   width: 100%;
   aspect-ratio: 1 / 1;
-  border-radius: 8px;
+  border-radius: 9px;
   border: 2px solid transparent;
   cursor: pointer;
   padding: 0;
+  transition: transform 0.12s;
 }
 
-/* Borda azul no quadradinho selecionado */
+.cor-opcao:hover {
+  transform: scale(1.06);
+}
+
 .cor-opcao.selecionada {
-  border-color: #1e3c72;
-  box-shadow: 0 0 0 2px rgba(30,60,114,0.25);
+  border-color: #16233d;
+  box-shadow: 0 0 0 2px #ffffff inset;
+}
+
+/* ---------- MENSAGENS ---------- */
+.mensagem {
+  margin-top: 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.mensagem.sucesso { color: #1e7e34; }
+.mensagem.erro { color: #c0392b; }
+
+.texto-ajuda {
+  font-size: 12.5px;
+  color: #8a99b0;
+  line-height: 1.55;
 }
 
 /* ---------- RESPONSIVIDADE ---------- */
-/* Em telas estreitas, o menu lateral vira uma faixa horizontal
-   no topo do conteúdo, com as opções lado a lado */
 @media (max-width: 800px) {
-  .layout-estoque {
-    flex-direction: column;
-  }
-  .menu-lateral {
-    flex: none;
-    width: auto;
-    position: static;
-    flex-direction: row;
+  .controles-tabela,
+  .controles-historico {
     flex-wrap: wrap;
   }
-  .item-menu { width: auto; }
+  .controles-tabela .campo-busca-interno,
+  .campo-busca-historico {
+    flex: 1 1 100%;
+  }
+  .seletor-ordenacao,
+  .seletor-filtro-historico {
+    flex: 1 1 45%;
+  }
+  .sanduiche-wrapper {
+    flex: 1 1 45%;
+  }
+  .linha-campos {
+    flex-direction: column;
+  }
 }
 
-/* ---------- BARRA DE FILTROS DO HISTÓRICO ---------- */
-/* Mesma mecânica da barra da tabela: flex com gap, busca
-   flexível e seletor com largura própria. */
-.controles-historico {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
-  margin-bottom: 14px;
+
+/* ============================================================
+   TEMA ESCURO — Módulo de Estoque
+   ============================================================ */
+body.tema-escuro .painel h2 {
+  color: #e8edf5;
 }
 
-.campo-busca-historico {
-  flex: 1;
-  min-width: 0;
-  height: 40px;
-  box-sizing: border-box;
-  padding: 0 12px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 14px;
+body.tema-escuro #form-produto label,
+body.tema-escuro .form-movimento label {
+  color: #8a99b0;
 }
 
-.seletor-filtro-historico {
-  flex: 0 0 160px;
-  height: 40px;
-  box-sizing: border-box;
-  padding: 0 10px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 14px;
-  background: #fff;
+body.tema-escuro #form-produto input,
+body.tema-escuro #form-produto select,
+body.tema-escuro .form-movimento input,
+body.tema-escuro .form-movimento select {
+  background: #22304a;
+  border-color: #2d3f5c;
+  color: #e8edf5;
+}
+
+body.tema-escuro #form-produto input::placeholder,
+body.tema-escuro .form-movimento input::placeholder {
+  color: #6b7d96;
+}
+
+body.tema-escuro #form-produto input[type="file"] {
+  background: #22304a;
+}
+
+body.tema-escuro .controles-tabela .campo-busca-interno,
+body.tema-escuro .seletor-ordenacao,
+body.tema-escuro .campo-busca-historico,
+body.tema-escuro .seletor-filtro-historico {
+  background: #22304a;
+  border-color: #2d3f5c;
+  color: #e8edf5;
+}
+
+body.tema-escuro .controles-tabela .campo-busca-interno::placeholder,
+body.tema-escuro .campo-busca-historico::placeholder {
+  color: #6b7d96;
+}
+
+body.tema-escuro .botao-sanduiche {
+  background: #22304a;
+  border-color: #2d3f5c;
+  color: #8a99b0;
+}
+
+body.tema-escuro .botao-sanduiche:hover {
+  background: #2d3f5c;
+  color: #e8edf5;
+}
+
+body.tema-escuro .menu-flutuante {
+  background: #182234;
+  border-color: #263449;
+}
+
+body.tema-escuro .item-menu-perfil {
+  color: #8a99b0;
+}
+
+body.tema-escuro .item-menu-perfil:hover {
+  background: #22304a;
+  color: #e8edf5;
+}
+
+body.tema-escuro .wrapper-tabela {
+  border-color: #263449;
+}
+
+body.tema-escuro .tabela-produtos th {
+  background: #1e2c44;
+  color: #8a99b0;
+  border-bottom-color: #263449;
+}
+
+body.tema-escuro .tabela-produtos td {
+  color: #c9d4e4;
+  border-bottom-color: #22304a;
+}
+
+body.tema-escuro .tabela-produtos tbody tr:hover {
+  background: #1e2c44;
+}
+
+body.tema-escuro .celula-codigo {
+  color: #e8edf5;
+}
+
+body.tema-escuro .foto-vazia {
+  background: #22304a;
+}
+
+body.tema-escuro .etiqueta-categoria {
+  color: #16233d;
+}
+
+body.tema-escuro .cartao-movimento {
+  background: #1e2c44;
+  border-color: #263449;
+  color: #8a99b0;
+}
+
+body.tema-escuro .cartao-movimento strong {
+  color: #e8edf5;
+}
+
+body.tema-escuro .menu-opcoes {
+  background: #182234;
+  border-color: #263449;
+}
+
+body.tema-escuro .item-opcao {
+  color: #8a99b0;
+}
+
+body.tema-escuro .item-opcao:hover {
+  background: #22304a;
+  color: #e8edf5;
+}
+
+body.tema-escuro .bloco-somente-leitura {
+  background: #1e2c44;
+  border-color: #263449;
+  color: #8a99b0;
+}
+
+body.tema-escuro .bloco-somente-leitura strong {
+  color: #e8edf5;
+}
+
+body.tema-escuro .cartao-categoria {
+  background: #1e2c44;
+  border-color: #263449;
+}
+
+body.tema-escuro .info-categoria {
+  color: #c9d4e4;
+}
+
+body.tema-escuro .cor-opcao.selecionada {
+  border-color: #e8edf5;
+  box-shadow: 0 0 0 2px #182234 inset;
+}
+
+body.tema-escuro .texto-ajuda {
+  color: #6b7d96;
+}
+
+body.tema-escuro .botao-modal-secundario {
+  background: #22304a;
+  border-color: #2d3f5c;
+  color: #8a99b0;
+}
+
+body.tema-escuro .botao-modal-secundario:hover {
+  background: #2d3f5c;
 }

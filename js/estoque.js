@@ -33,6 +33,15 @@ import {
   query, where, getDocs, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+import {
+  iniciarLayoutBase,
+  abrirModalBase,
+  fecharModalBase,
+  aplicarPermissoesSidebar,
+  obterDadosUsuario,
+  atualizarCabecalhoUsuario
+} from "./layout-base.js";
+
 // ------------------------------------------------------------
 // LISTA DE ADMINISTRADORES + CARGOS AUTORIZADOS
 // ------------------------------------------------------------
@@ -100,14 +109,13 @@ const acessoNegado = document.getElementById("acesso-negado");
 const conteudoEstoque = document.getElementById("conteudo-estoque");
 
 // Cabeçalho
-const botaoVoltar = document.getElementById("botao-voltar");
 const botaoPerfil = document.getElementById("botao-perfil");
 const menuPerfil = document.getElementById("menu-perfil");
 const itemConfiguracoes = document.getElementById("item-configuracoes");
 const itemSair = document.getElementById("item-sair");
 
 // Menu lateral e painéis
-const itensMenu = document.querySelectorAll(".item-menu");
+const itensMenu = document.querySelectorAll(".aba-modulo");
 const paineis = document.querySelectorAll(".painel");
 
 // Cadastro de produto
@@ -182,14 +190,11 @@ function mostrarMensagem(texto, tipo) {
 // appendChild MOVE o elemento para dentro da caixa branca.
 // ------------------------------------------------------------
 function abrirModal(conteudo) {
-  modalConteudo.innerHTML = "";
-  modalConteudo.appendChild(conteudo);
-  modalOverlay.style.display = "flex";
+  abrirModalBase(conteudo);
 }
 
 function fecharModal() {
-  modalOverlay.style.display = "none";
-  modalConteudo.innerHTML = "";
+  fecharModalBase();
   fotoEdicaoSelecionada = null;
   edicaoModificada = false;
   corEdicaoSelecionada = null;
@@ -224,16 +229,18 @@ onAuthStateChanged(auth, async (usuario) => {
 
   if (!autorizado) {
     conteudoProtegido.classList.remove("oculto");
+    iniciarLayoutBase();
+    aplicarPermissoesSidebar(null, ehAdminEmail);
     acessoNegado.style.display = "block";
     return;
   }
 
   conteudoProtegido.classList.remove("oculto");
+  iniciarLayoutBase();
+  aplicarPermissoesSidebar(null, ehAdminEmail);
 
-  const nomeCompleto = usuario.displayName || (usuario.email || "").split("@")[0];
-  const primeiroNome = nomeCompleto.split(" ")[0];
-  nomeUsuario.textContent = primeiroNome;
-  avatar.textContent = primeiroNome.charAt(0).toUpperCase();
+  const dadosUsuario = await obterDadosUsuario(usuario, db);
+  atualizarCabecalhoUsuario(dadosUsuario);
 
   conteudoEstoque.style.display = "block";
   escutarProdutos();
@@ -272,7 +279,7 @@ async function usuarioTemCargoAutorizado(email) {
 // ------------------------------------------------------------
 function ativarPainel(nome) {
   itensMenu.forEach((i) =>
-    i.classList.toggle("ativo", i.dataset.painel === nome));
+    i.classList.toggle("ativa", i.dataset.painel === nome));
   paineis.forEach((p) =>
     p.classList.toggle("visivel", p.id === "painel-" + nome));
 }
@@ -287,25 +294,10 @@ itensMenu.forEach((item) => {
 });
 
 // ------------------------------------------------------------
-// BOTÃO VOLTAR (com confirmação)
-// ------------------------------------------------------------
-botaoVoltar.addEventListener("click", () => {
-  const querVoltar = window.confirm("Deseja realmente voltar para a página inicial?");
-  if (querVoltar) {
-    window.location.href = "home.html";
-  }
-});
-
-// ------------------------------------------------------------
 // MENUS FLUTUANTES (perfil e sanduíche) + FECHAMENTO GLOBAL
 // Um único ouvinte no documento fecha os três menus possíveis
 // (perfil, sanduíche e menu dos três pontinhos) ao clicar fora.
 // ------------------------------------------------------------
-botaoPerfil.addEventListener("click", () => {
-  menuTabela.classList.remove("aberta");
-  menuPerfil.classList.toggle("aberta");
-});
-
 botaoMenuTabela.addEventListener("click", () => {
   menuPerfil.classList.remove("aberta");
   menuTabela.classList.toggle("aberta");
@@ -999,17 +991,8 @@ function processarFoto(arquivo, quandoPronto) {
 // ------------------------------------------------------------
 async function obterNomeUsuario(email) {
   try {
-    const resultado = await getDocs(collection(db, "solicitacoes"));
-    let nome = email;
-
-    resultado.forEach((documento) => {
-      const dados = documento.data();
-      if ((dados.email || "").toLowerCase() === email.toLowerCase() && dados.nome) {
-        nome = dados.nome;
-      }
-    });
-
-    return nome;
+    const dados = await obterDadosUsuario({ email }, db);
+    return dados.nomeCompleto;
   } catch (erro) {
     return email;
   }
