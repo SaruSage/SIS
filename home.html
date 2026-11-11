@@ -1,172 +1,160 @@
 <!DOCTYPE html>
-<!--
-  ============================================================
-  PROJETO GOLDEN — Homepage (portal de aplicações)
-  ============================================================
-  Estrutura em 3 regiões:
-  1. TOPBAR   → busca, botão de notificações e perfil (direita)
-  2. CONTEÚDO → grade de cards das aplicações
-  3. SIDEBAR  → centro de controle, fixo na lateral direita
-  A página é PROTEGIDA: o home.js só revela tudo depois de
-  confirmar que há um usuário logado. Os cards visíveis
-  dependem do CARGO do usuário (mapa de acesso no home.js).
-  ============================================================
--->
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Início — Projeto Golden</title>
-  <!--
-    DOIS arquivos de estilo, NESSA ORDEM:
-    1. style.css  → estilos gerais (botões, mensagens, formulários)
-    2. home.css   → estilos exclusivos do portal; entra DEPOIS
-       para sobrescrever o comportamento do body herdado da
-       tela de login (regra da cascata: o último arquivo vence).
-  -->
+  <script>
+    (function(){var t=localStorage.getItem("golden-tema")||"claro",f=localStorage.getItem("golden-fonte")||"normal";document.documentElement.className="tema-"+t+" fonte-"+f;})();
+  </script>
   <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/layout-base.css">
   <link rel="stylesheet" href="css/home.css">
 </head>
 <body>
+  <script>
+    (function(){var t=localStorage.getItem("golden-tema")||"claro",f=localStorage.getItem("golden-fonte")||"normal";document.body.className="tema-"+t+" fonte-"+f;})();
+  </script>
 
-  <!--
-    Tudo começa escondido (classe "oculto"). O home.js remove
-    essa classe só depois da verificação de login passar.
-  -->
   <div id="conteudo-protegido" class="oculto">
+    <div class="app-shell">
 
-    <!-- ======================================================
-         REGIÃO 1 — TOPBAR (barra superior fixa)
-         ====================================================== -->
-    <header class="topbar">
-
-      <!-- Campo de pesquisa: filtra os cards em tempo real -->
-      <input
-        type="text"
-        id="campo-busca"
-        class="campo-busca"
-        placeholder="Buscar aplicação..."
-        autocomplete="off"
-      />
-
-      <!-- Ações do usuário, agrupadas à direita -->
-      <div class="acoes-usuario">
-
-        <!-- Botão do sino: abre/fecha a caixa de notificações -->
-        <button type="button" id="botao-notificacoes" class="botao-icone" title="Notificações">
-          🔔
-          <!-- Bolinha vermelha de "há notificações não lidas".
-               O JS a esconde quando a caixa é aberta. -->
-          <span id="selo-notificacao" class="selo"></span>
-        </button>
-
-        <!-- Botão do perfil: abre/fecha o menu do perfil -->
-        <button type="button" id="botao-perfil" class="botao-perfil">
-          <span class="avatar" id="avatar">?</span>
-          <span id="nome-usuario">Carregando...</span>
-          <span class="seta">▾</span>
-        </button>
-      </div>
-
-      <!--
-        CAIXA DE NOTIFICAÇÕES
-        Posicionada "absoluta" logo abaixo do sino. Começa
-        escondida; o JS alterna com a classe "aberta".
-      -->
-      <div id="caixa-notificacoes" class="caixa-flutuante">
-        <h3>Notificações</h3>
-        <ul id="lista-notificacoes">
-          <!-- O JS preenche esta lista -->
-        </ul>
-      </div>
-
-      <!--
-        MENU DO PERFIL
-        Mesma mecânica da caixa de notificações, mas ancorado
-        no botão de perfil.
-      -->
-      <div id="menu-perfil" class="caixa-flutuante">
-        <p id="email-usuario" class="texto-ajuda"></p>
-        <button type="button" id="botao-sair" class="botao-secundario">Sair</button>
-      </div>
-
-    </header>
-
-    <!-- ======================================================
-         REGIÕES 2 e 3 — conteúdo principal + sidebar
-         O "layout-principal" divide a tela em duas colunas.
-         ====================================================== -->
-    <div class="layout-principal">
-
-      <!-- REGIÃO 2 — Grade de aplicações -->
-      <main class="area-apps">
-        <h2>Aplicações</h2>
-
-        <!--
-          Cada card é uma "aplicação". O atributo data-nome
-          guarda o texto que a busca usa para filtrar E que o
-          mapa de permissões usa para decidir quem vê o quê.
-          Os cards apontam para páginas que ainda serão criadas.
-        -->
-        <div class="grade-apps" id="grade-apps">
-
-            <a href="estoque.html" class="card-app" data-nome="estoque">
-            <span class="icone-app">📦</span>
-            <span class="titulo-app">Estoque</span>
-            <span class="desc-app">Controle de cabos e materiais</span>
-          </a>
-
-          <a href="vendas.html" class="card-app" data-nome="vendas">
-            <span class="icone-app">💰</span>
-            <span class="titulo-app">Vendas</span>
-            <span class="desc-app">Registro de orçamentos e vendas</span>
-          </a>
-
-          <a href="#" class="card-app" data-nome="producao">
-            <span class="icone-app">🔧</span>
-            <span class="titulo-app">Produção</span>
-            <span class="desc-app">Ordens de serviço e montagem</span>
-          </a>
-
-          <a href="#" class="card-app" data-nome="consultoria">
-            <span class="icone-app">📋</span>
-            <span class="titulo-app">Consultoria</span>
-            <span class="desc-app">Projetos e atendimentos técnicos</span>
-          </a>
-
+      <aside class="sidebar">
+        <div class="sidebar-topo">
+          <span class="sidebar-logo">Projeto Golden</span>
+          <button type="button" class="botao-recolher" title="Recolher menu"><span data-icone="recolher" data-tamanho="16"></span></button>
         </div>
 
-        <!-- Mensagem exibida quando a busca não encontra nada -->
-        <p id="sem-resultados" class="texto-ajuda" style="display:none;">
-          Nenhuma aplicação encontrada.
-        </p>
-      </main>
+        <nav class="sidebar-nav">
+          <a href="home.html" class="nav-item">
+            <span class="nav-icone" data-icone="home"></span>
+            <span class="nav-label">Home</span>
+          </a>
+          <a href="vendas.html" class="nav-item" data-cargos="vendas">
+            <span class="nav-icone" data-icone="vendas"></span>
+            <span class="nav-label">Vendas</span>
+          </a>
+          <a href="estoque.html" class="nav-item" data-cargos="estoque">
+            <span class="nav-icone" data-icone="estoque"></span>
+            <span class="nav-label">Estoque</span>
+          </a>
+          <a href="#" class="nav-item" data-cargos="producao">
+            <span class="nav-icone" data-icone="producao"></span>
+            <span class="nav-label">Produção</span>
+          </a>
+          <a href="#" class="nav-item" data-cargos="consultoria">
+            <span class="nav-icone" data-icone="consultoria"></span>
+            <span class="nav-label">Consultoria</span>
+          </a>
+          <a href="adm.html" class="nav-item" data-admin-only>
+            <span class="nav-icone" data-icone="admin"></span>
+            <span class="nav-label">Administrador</span>
+          </a>
+        </nav>
 
-      <!-- REGIÃO 3 — Centro de controle (lateral direita) -->
-      <aside class="centro-controle">
-        <h3>Centro de controle</h3>
+        <div class="sidebar-rodape">
+          <div class="card-controle">
+            <h4>Centro de controle</h4>
+            <div class="linha-controle">
+              <span>Usuários ativos</span>
+              <strong id="contagem-usuarios">—</strong>
+            </div>
+            <div class="linha-controle">
+              <span>Solicitações</span>
+              <strong id="contagem-pendentes">—</strong>
+            </div>
+          </div>
 
-        <div class="item-controle">
-          <span class="rotulo-controle">Usuários ativos</span>
-          <span class="valor-controle" id="contagem-usuarios">—</span>
+          <div class="sidebar-config">
+            <button type="button" id="botao-config" class="botao-config">
+              <span class="nav-icone" data-icone="config" data-tamanho="15"></span>
+              <span class="nav-label">Configurações</span>
+            </button>
+          </div>
         </div>
-
-        <div class="item-controle">
-          <span class="rotulo-controle">Solicitações pendentes</span>
-          <span class="valor-controle" id="contagem-pendentes">—</span>
-        </div>
-
-        <!-- Atalho: só aparece para administradores -->
-        <a href="adm.html" id="atalho-admin" class="atalho-admin" style="display:none;">
-          Abrir painel administrativo →
-        </a>
       </aside>
 
-    </div>
+      <div class="app-main">
 
+        <header class="app-header">
+          <div class="header-busca">
+            <span class="icone-busca" data-icone="busca" data-tamanho="15"></span>
+            <input type="text" id="campo-busca" placeholder="Buscar aplicação..." autocomplete="off">
+          </div>
+
+          <div class="header-acoes">
+            <button type="button" id="botao-notificacoes" class="botao-header-icone" title="Notificações">
+              <span data-icone="sino" data-tamanho="18"></span>
+              <span id="selo-notificacao" class="selo-notificacao"></span>
+            </button>
+
+            <button type="button" id="botao-perfil" class="botao-perfil-header">
+              <span class="avatar-header" id="avatar">?</span>
+              <span class="nome-header" id="nome-usuario">Carregando...</span>
+            </button>
+
+            <div id="caixa-notificacoes" class="caixa-header">
+              <h3>Notificações</h3>
+              <ul id="lista-notificacoes"></ul>
+            </div>
+
+            <div id="menu-perfil" class="caixa-header">
+              <div class="perfil-info-topo">
+                <p id="nome-completo-usuario" class="texto-nome-perfil">Carregando...</p>
+                <p id="email-usuario" class="texto-email"></p>
+              </div>
+              <button type="button" id="item-config-usuario" class="item-caixa" title="Configurações do usuário">
+                <span data-icone="config" data-tamanho="13"></span> Configurações
+              </button>
+              <div class="divisor-menu-perfil"></div>
+              <button type="button" id="botao-sair" class="item-caixa perigo"><span data-icone="sair" data-tamanho="13"></span> Sair</button>
+            </div>
+          </div>
+        </header>
+
+        <main class="app-conteudo">
+          <div class="cabecalho-pagina">
+            <div>
+              <h1 class="titulo-pagina">Aplicações</h1>
+              <p class="subtitulo-pagina">Acesse os módulos do sistema</p>
+            </div>
+          </div>
+
+          <div class="grade-apps" id="grade-apps">
+            <a href="estoque.html" class="card-app" data-nome="estoque">
+              <span class="icone-app">📦</span>
+              <span class="titulo-app">Estoque</span>
+              <span class="desc-app">Controle de cabos e materiais</span>
+            </a>
+
+            <a href="vendas.html" class="card-app" data-nome="vendas">
+              <span class="icone-app">💰</span>
+              <span class="titulo-app">Vendas</span>
+              <span class="desc-app">Registro de orçamentos e vendas</span>
+            </a>
+
+            <a href="#" class="card-app" data-nome="producao">
+              <span class="icone-app">🔧</span>
+              <span class="titulo-app">Produção</span>
+              <span class="desc-app">Ordens de serviço e montagem</span>
+            </a>
+
+            <a href="#" class="card-app" data-nome="consultoria">
+              <span class="icone-app">📋</span>
+              <span class="titulo-app">Consultoria</span>
+              <span class="desc-app">Projetos e atendimentos técnicos</span>
+            </a>
+          </div>
+
+          <p id="sem-resultados" class="texto-ajuda" style="display:none;">
+            Nenhuma aplicação encontrada.
+          </p>
+        </main>
+
+      </div>
+    </div>
   </div>
 
   <script type="module" src="js/home.js"></script>
-
 </body>
 </html>

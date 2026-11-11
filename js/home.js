@@ -21,6 +21,13 @@ import { onAuthStateChanged, signOut } from
 import { collection, getDocs } from
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+import {
+  iniciarLayoutBase,
+  aplicarPermissoesSidebar,
+  obterDadosUsuario,
+  atualizarCabecalhoUsuario
+} from "./layout-base.js";
+
 // ------------------------------------------------------------
 // Capturando os elementos da tela
 // ------------------------------------------------------------
@@ -40,7 +47,6 @@ const gradeApps = document.getElementById("grade-apps");
 const semResultados = document.getElementById("sem-resultados");
 const contagemUsuarios = document.getElementById("contagem-usuarios");
 const contagemPendentes = document.getElementById("contagem-pendentes");
-const atalhoAdmin = document.getElementById("atalho-admin");
 
 // ------------------------------------------------------------
 // LISTA DE ADMINISTRADORES
@@ -78,7 +84,7 @@ let cargoAtual = null;
 // Mesma guarda das outras páginas, mas aqui também preenchemos
 // o avatar (inicial do nome) e disparamos a leitura dos dados.
 // ------------------------------------------------------------
-onAuthStateChanged(auth, (usuario) => {
+onAuthStateChanged(auth, async (usuario) => {
   if (!usuario) {
     window.location.href = "index.html";
     return;
@@ -86,56 +92,15 @@ onAuthStateChanged(auth, (usuario) => {
 
   // Revela todo o conteúdo da página.
   conteudoProtegido.classList.remove("oculto");
+  iniciarLayoutBase();
 
-  // Saudação: usa o nome se existir, senão o e-mail.
-  const nome = usuario.displayName || usuario.email;
-  nomeUsuario.textContent = nome;
-  emailUsuario.textContent = usuario.email;
-
-  // Primeira letra do nome, em maiúscula, dentro do avatar.
-  avatar.textContent = nome.charAt(0).toUpperCase();
+  const dadosUsuario = await obterDadosUsuario(usuario, db);
+  atualizarCabecalhoUsuario(dadosUsuario);
 
   carregarNotificacoes();
   carregarDadosDoUsuario();
 });
 
-// ------------------------------------------------------------
-// 2) ALTERNAR CAIXAS FLUTUANTES (notificações e perfil)
-// "toggle" = liga/desliga: se a caixa está aberta, fecha;
-// se está fechada, abre. E ao abrir uma, fechamos a outra —
-// assim as duas nunca ficam abertas ao mesmo tempo.
-// ------------------------------------------------------------
-botaoNotificacoes.addEventListener("click", () => {
-  const vaiAbrir = !caixaNotificacoes.classList.contains("aberta");
-  menuPerfil.classList.remove("aberta");
-  caixaNotificacoes.classList.toggle("aberta", vaiAbrir);
-  // Abriu a caixa? Então o usuário "leu" as novidades:
-  // o selo vermelho desaparece.
-  if (vaiAbrir) seloNotificacao.classList.remove("visivel");
-});
-
-botaoPerfil.addEventListener("click", () => {
-  const vaiAbrir = !menuPerfil.classList.contains("aberta");
-  caixaNotificacoes.classList.remove("aberta");
-  menuPerfil.classList.toggle("aberta", vaiAbrir);
-});
-
-// Fecha as duas caixas ao clicar FORA delas.
-// O clique no documento inteiro é capturado; se o alvo do
-// clique não estiver dentro de nenhuma caixa nem de seus
-// botões, ambas são fechadas.
-document.addEventListener("click", (evento) => {
-  const clicouFora =
-    !caixaNotificacoes.contains(evento.target) &&
-    !menuPerfil.contains(evento.target) &&
-    !botaoNotificacoes.contains(evento.target) &&
-    !botaoPerfil.contains(evento.target);
-
-  if (clicouFora) {
-    caixaNotificacoes.classList.remove("aberta");
-    menuPerfil.classList.remove("aberta");
-  }
-});
 
 // ------------------------------------------------------------
 // 3) NOTIFICAÇÕES
@@ -218,7 +183,7 @@ function aplicarPermissoes() {
     const podeVer = permitidos.includes(card.dataset.nome);
     card.style.display = podeVer ? "flex" : "none";
   });
-  atalhoAdmin.style.display = ehAdmin ? "block" : "none";
+  aplicarPermissoesSidebar(cargoAtual, ehAdmin);
 }
 
 // ------------------------------------------------------------

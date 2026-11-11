@@ -1,107 +1,159 @@
 <!DOCTYPE html>
-<!--
-  ============================================================
-  PROJETO GOLDEN — Painel do Administrador
-  ============================================================
-  O painel tem TRÊS ABAS:
-  1. Pendentes  → solicitações aguardando decisão (aprovar/rejeitar)
-  2. Aprovados  → contas liberadas (bloquear / excluir / reativar)
-  3. Rejeitados → histórico somente leitura de quem tentou cadastrar
-  Acima das abas fica a seção de geração de códigos de adesão,
-  agora com botão de COPIAR o código com um clique.
-  ============================================================
--->
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Administração — Projeto Golden</title>
+  <title>Administrador — Projeto Golden</title>
+  <script>
+    (function(){var t=localStorage.getItem("golden-tema")||"claro",f=localStorage.getItem("golden-fonte")||"normal";document.documentElement.className="tema-"+t+" fonte-"+f;})();
+  </script>
   <link rel="stylesheet" href="css/style.css">
-
-  <!-- Biblioteca do EmailJS (envio de e-mails pelo navegador) -->
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <link rel="stylesheet" href="css/layout-base.css">
+  <link rel="stylesheet" href="css/adm.css">
 </head>
 <body>
+  <script>
+    (function(){var t=localStorage.getItem("golden-tema")||"claro",f=localStorage.getItem("golden-fonte")||"normal";document.body.className="tema-"+t+" fonte-"+f;})();
+  </script>
 
-  <div class="container container-largo">
+  <div id="conteudo-protegido" class="oculto">
+    <div class="app-shell">
 
-    <h1>Painel do Administrador</h1>
-    <p class="subtitulo" id="boas-vindas">Carregando...</p>
-
-    <!-- Mensagem exibida se um NÃO-administrador abrir a página -->
-    <p id="acesso-negado" class="mensagem erro" style="display:none;">
-      Esta área é restrita a administradores.
-    </p>
-
-    <!-- Conteúdo visível apenas para administradores -->
-    <div id="conteudo-admin" style="display:none;">
-
-      <!-- Seção de geração de códigos (sempre visível, acima das abas) -->
-      <section class="secao-admin">
-        <h2>Códigos de adesão</h2>
-        <p class="texto-ajuda">
-          Gere um código e envie-o à pessoa autorizada a se cadastrar.
-          Cada código funciona uma única vez.
-        </p>
-        <button type="button" id="botao-gerar-codigo">Gerar código</button>
-
-        <!--
-          Bloco do código gerado. Começa escondido e só aparece
-          quando um código é criado. O botão ao lado copia o
-          código com um clique.
-        -->
-        <div id="bloco-codigo-gerado" style="display:none;">
-          <p id="codigo-gerado" class="codigo-destaque"></p>
-          <button type="button" id="botao-copiar-codigo" class="botao-copiar">
-            Copiar código
-          </button>
+      <aside class="sidebar">
+        <div class="sidebar-topo">
+          <span class="sidebar-logo">Projeto Golden</span>
+          <button type="button" class="botao-recolher" title="Recolher menu"><span data-icone="recolher" data-tamanho="16"></span></button>
         </div>
-      </section>
 
-      <!--
-        BARRA DE ABAS
-        Cada botão tem um atributo "data-aba" com o nome do painel
-        que ele controla. O JS lê esse atributo com botao.dataset.aba.
-      -->
-      <div class="abas">
-        <button type="button" class="aba aba-ativa" data-aba="pendentes">Pendentes</button>
-        <button type="button" class="aba" data-aba="aprovados">Aprovados</button>
-        <button type="button" class="aba" data-aba="rejeitados">Rejeitados</button>
-      </div>
+        <nav class="sidebar-nav">
+          <a href="home.html" class="nav-item">
+            <span class="nav-icone" data-icone="home"></span>
+            <span class="nav-label">Home</span>
+          </a>
+          <a href="vendas.html" class="nav-item" data-cargos="vendas">
+            <span class="nav-icone" data-icone="vendas"></span>
+            <span class="nav-label">Vendas</span>
+          </a>
+          <a href="estoque.html" class="nav-item" data-cargos="estoque">
+            <span class="nav-icone" data-icone="estoque"></span>
+            <span class="nav-label">Estoque</span>
+          </a>
+          <a href="#" class="nav-item" data-cargos="producao">
+            <span class="nav-icone" data-icone="producao"></span>
+            <span class="nav-label">Produção</span>
+          </a>
+          <a href="#" class="nav-item" data-cargos="consultoria">
+            <span class="nav-icone" data-icone="consultoria"></span>
+            <span class="nav-label">Consultoria</span>
+          </a>
+          <a href="adm.html" class="nav-item ativo" data-admin-only>
+            <span class="nav-icone" data-icone="admin"></span>
+            <span class="nav-label">Administrador</span>
+          </a>
+        </nav>
 
-      <!-- PAINEL 1: pendentes (visível por padrão) -->
-      <div id="painel-pendentes" class="painel-aba painel-visivel">
-        <div id="lista-pendentes">
-          <p class="texto-ajuda">Nenhuma solicitação pendente no momento.</p>
+        <div class="sidebar-rodape">
+          <div class="card-controle">
+            <h4>Centro de controle</h4>
+            <div class="linha-controle">
+              <span>Usuários ativos</span>
+              <strong id="contagem-usuarios">—</strong>
+            </div>
+            <div class="linha-controle">
+              <span>Solicitações</span>
+              <strong id="contagem-pendentes">—</strong>
+            </div>
+          </div>
+
+          <div class="sidebar-config">
+            <button type="button" id="botao-config" class="botao-config">
+              <span class="nav-icone" data-icone="config" data-tamanho="15"></span>
+              <span class="nav-label">Configurações</span>
+            </button>
+          </div>
         </div>
-      </div>
+      </aside>
 
-      <!-- PAINEL 2: aprovados (começa escondido) -->
-      <div id="painel-aprovados" class="painel-aba">
-        <div id="lista-aprovados">
-          <p class="texto-ajuda">Nenhum usuário aprovado ainda.</p>
-        </div>
-      </div>
+      <div class="app-main">
 
-      <!-- PAINEL 3: rejeitados (histórico, sem botões de ação) -->
-      <div id="painel-rejeitados" class="painel-aba">
-        <div id="lista-rejeitados">
-          <p class="texto-ajuda">Nenhuma solicitação rejeitada ainda.</p>
-        </div>
-      </div>
+        <header class="app-header">
+          <div class="header-busca">
+            <span class="icone-busca" data-icone="busca" data-tamanho="15"></span>
+            <input type="text" id="busca-global" placeholder="Buscar no sistema..." autocomplete="off">
+          </div>
 
+          <div class="header-acoes">
+            <button type="button" id="botao-notificacoes" class="botao-header-icone" title="Notificações">
+              <span data-icone="sino" data-tamanho="18"></span>
+              <span id="selo-notificacao" class="selo-notificacao"></span>
+            </button>
+
+            <button type="button" id="botao-perfil" class="botao-perfil-header">
+              <span class="avatar-header" id="avatar">?</span>
+              <span class="nome-header" id="nome-usuario">...</span>
+            </button>
+
+            <div id="caixa-notificacoes" class="caixa-header">
+              <h3>Notificações</h3>
+              <ul id="lista-notificacoes">
+                <li>Bem-vindo ao Projeto Golden.</li>
+              </ul>
+            </div>
+
+            <div id="menu-perfil" class="caixa-header">
+              <div class="perfil-info-topo">
+                <p id="nome-completo-usuario" class="texto-nome-perfil">Carregando...</p>
+                <p id="email-usuario" class="texto-email"></p>
+              </div>
+              <button type="button" id="item-config-usuario" class="item-caixa" title="Configurações do usuário">
+                <span data-icone="config" data-tamanho="13"></span> Configurações
+              </button>
+              <div class="divisor-menu-perfil"></div>
+              <button type="button" id="botao-sair" class="item-caixa perigo"><span data-icone="sair" data-tamanho="13"></span> Sair</button>
+            </div>
+          </div>
+        </header>
+
+        <main class="app-conteudo">
+
+          <div class="cabecalho-pagina">
+            <div>
+              <h1 class="titulo-pagina">Painel do Administrador</h1>
+              <p class="subtitulo-pagina">Gestão de acessos e solicitações</p>
+            </div>
+          </div>
+
+          <div class="painel-branco bloco-adm">
+            <h2>Códigos de adesão</h2>
+            <p class="desc-adm">Gere um código e envie à pessoa autorizada a se cadastrar. Cada código funciona uma única vez.</p>
+            <button type="button" id="botao-gerar-codigo" class="botao-primario">Gerar código</button>
+            <div id="area-codigo-gerado" class="area-codigo" style="display:none;"></div>
+          </div>
+
+          <div class="painel-branco bloco-adm">
+            <h2>Solicitações</h2>
+            <div class="abas-adm">
+              <button type="button" class="aba-adm ativa" data-filtro="pendente">Pendentes</button>
+              <button type="button" class="aba-adm" data-filtro="aprovada">Aprovados</button>
+              <button type="button" class="aba-adm" data-filtro="rejeitada">Rejeitados</button>
+            </div>
+            <div id="lista-solicitacoes">
+              <p class="texto-ajuda">Carregando solicitações...</p>
+            </div>
+          </div>
+
+          <p id="mensagem" class="mensagem"></p>
+
+        </main>
+
+      </div>
     </div>
+  </div>
 
-    <!--
-      Botão Sair FORA do bloco admin: visível mesmo com acesso negado.
-    -->
-    <button type="button" id="botao-sair" class="botao-secundario">Sair</button>
-
-    <p id="mensagem" class="mensagem"></p>
-
+  <div id="modal-overlay" class="modal-overlay" style="display:none;">
+    <div id="modal-conteudo" class="modal-conteudo"></div>
   </div>
 
   <script type="module" src="js/adm.js"></script>
-
 </body>
 </html>

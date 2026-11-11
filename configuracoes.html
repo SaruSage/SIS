@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configurações — Projeto Golden</title>
+  <script>
+    (function(){var t=localStorage.getItem("golden-tema")||"claro",f=localStorage.getItem("golden-fonte")||"normal";document.documentElement.className="tema-"+t+" fonte-"+f;})();
+  </script>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/layout-base.css">
+  <link rel="stylesheet" href="css/configuracoes.css">
+</head>
+<body>
+  <script>
+    (function(){var t=localStorage.getItem("golden-tema")||"claro",f=localStorage.getItem("golden-fonte")||"normal";document.body.className="tema-"+t+" fonte-"+f;})();
+  </script>
+
+  <div id="conteudo-protegido" class="oculto">
+    <div class="app-shell">
+
+      <aside class="sidebar">
+        <div class="sidebar-topo">
+          <span class="sidebar-logo">Projeto Golden</span>
+          <button type="button" class="botao-recolher" title="Recolher menu"><span data-icone="recolher" data-tamanho="16"></span></button>
+        </div>
+
+        <nav class="sidebar-nav">
+          <a href="home.html" class="nav-item">
+            <span class="nav-icone" data-icone="home"></span>
+            <span class="nav-label">Home</span>
+          </a>
+          <a href="vendas.html" class="nav-item" data-cargos="vendas">
+            <span class="nav-icone" data-icone="vendas"></span>
+            <span class="nav-label">Vendas</span>
+          </a>
+          <a href="estoque.html" class="nav-item" data-cargos="estoque">
+            <span class="nav-icone" data-icone="estoque"></span>
+            <span class="nav-label">Estoque</span>
+          </a>
+          <a href="#" class="nav-item" data-cargos="producao">
+            <span class="nav-icone" data-icone="producao"></span>
+            <span class="nav-label">Produção</span>
+          </a>
+          <a href="#" class="nav-item" data-cargos="consultoria">
+            <span class="nav-icone" data-icone="consultoria"></span>
+            <span class="nav-label">Consultoria</span>
+          </a>
+          <a href="adm.html" class="nav-item" data-admin-only>
+            <span class="nav-icone" data-icone="admin"></span>
+            <span class="nav-label">Administrador</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-rodape">
+          <div class="card-controle">
+            <h4>Centro de controle</h4>
+            <div class="linha-controle">
+              <span>Usuários ativos</span>
+              <strong id="contagem-usuarios">—</strong>
+            </div>
+            <div class="linha-controle">
+              <span>Solicitações</span>
+              <strong id="contagem-pendentes">—</strong>
+            </div>
+          </div>
+
+          <div class="sidebar-config">
+            <button type="button" id="botao-config" class="botao-config">
+              <span class="nav-icone" data-icone="config" data-tamanho="15"></span>
+              <span class="nav-label">Configurações</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <div class="app-main">
+
+        <header class="app-header">
+          <div class="header-busca">
+            <span class="icone-busca" data-icone="busca" data-tamanho="15"></span>
+            <input type="text" id="busca-global" placeholder="Buscar no sistema..." autocomplete="off">
+          </div>
+
+          <div class="header-acoes">
+            <button type="button" id="botao-notificacoes" class="botao-header-icone" title="Notificações">
+              <span data-icone="sino" data-tamanho="18"></span>
+              <span id="selo-notificacao" class="selo-notificacao"></span>
+            </button>
+
+            <button type="button" id="botao-perfil" class="botao-perfil-header">
+              <span class="avatar-header" id="avatar">?</span>
+              <span class="nome-header" id="nome-usuario">...</span>
+            </button>
+
+            <div id="caixa-notificacoes" class="caixa-header">
+              <h3>Notificações</h3>
+              <ul id="lista-notificacoes">
+                <li>Bem-vindo ao Projeto Golden.</li>
+              </ul>
+            </div>
+
+            <div id="menu-perfil" class="caixa-header">
+              <div class="perfil-info-topo">
+                <p id="nome-completo-usuario" class="texto-nome-perfil">Carregando...</p>
+                <p id="email-usuario" class="texto-email"></p>
+              </div>
+              <button type="button" id="item-config-usuario" class="item-caixa" title="Configurações do usuário">
+                <span data-icone="config" data-tamanho="13"></span> Configurações
+              </button>
+              <div class="divisor-menu-perfil"></div>
+              <button type="button" id="botao-sair" class="item-caixa perigo"><span data-icone="sair" data-tamanho="13"></span> Sair</button>
+            </div>
+          </div>
+        </header>
+
+        <main class="app-conteudo conteudo-config-compacto">
+
+          <div class="cabecalho-pagina cabecalho-config-compacto">
+            <div>
+              <h1 class="titulo-pagina">Configurações</h1>
+              <p class="subtitulo-pagina">Ajuste e personalize a aparência da plataforma</p>
+            </div>
+          </div>
+
+          <div class="grade-config-compacta">
+            <!-- Card 1: Tema -->
+            <div class="card-config-box">
+              <div class="card-config-topo">
+                <span class="icone-card-config" data-icone="olho" data-tamanho="16"></span>
+                <div>
+                  <h2 class="titulo-card-config">Tema do Sistema</h2>
+                  <p class="desc-card-config">Alterne entre a exibição clara e o modo escuro</p>
+                </div>
+              </div>
+              <div class="opcoes-config" id="opcoes-tema">
+                <button type="button" class="opcao-config" data-tema="claro">
+                  <span class="preview-tema preview-claro"></span>
+                  <span class="nome-opcao">Claro</span>
+                </button>
+                <button type="button" class="opcao-config" data-tema="escuro">
+                  <span class="preview-tema preview-escuro"></span>
+                  <span class="nome-opcao">Escuro</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Card 2: Tamanho da Fonte -->
+            <div class="card-config-box">
+              <div class="card-config-topo">
+                <span class="icone-card-config" data-icone="editar" data-tamanho="16"></span>
+                <div>
+                  <h2 class="titulo-card-config">Tamanho da Fonte</h2>
+                  <p class="desc-card-config">Defina a escala da tipografia nos módulos</p>
+                </div>
+              </div>
+              <div class="opcoes-config" id="opcoes-fonte">
+                <button type="button" class="opcao-config" data-fonte="pequena">
+                  <span class="amostra-fonte amostra-pequena">Aa</span>
+                  <span class="nome-opcao">Pequena</span>
+                </button>
+                <button type="button" class="opcao-config" data-fonte="normal">
+                  <span class="amostra-fonte amostra-normal">Aa</span>
+                  <span class="nome-opcao">Normal</span>
+                </button>
+                <button type="button" class="opcao-config" data-fonte="grande">
+                  <span class="amostra-fonte amostra-grande">Aa</span>
+                  <span class="nome-opcao">Grande</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Banner Informativo Compacto -->
+          <div class="card-info-config-rodape">
+            <div class="info-config-item">
+              <span class="ponto-status-ativo"></span>
+              <span>Preferências salvas automaticamente no navegador</span>
+            </div>
+            <div class="info-config-item">
+              <span class="tag-versao">Projeto Golden v 0.1.11</span>
+            </div>
+          </div>
+
+          <!-- Card de Novidades e Atualizações da Versão -->
+          <div class="card-atualizacoes-versao">
+            <div class="atualizacoes-topo">
+              <div class="atualizacoes-titulo-bloco">
+                <span class="icone-atualizacoes" data-icone="historico" data-tamanho="16"></span>
+                <div>
+                  <h2 class="titulo-atualizacoes">Novidades da Versão 0.1.11</h2>
+                  <p class="subtitulo-atualizacoes">Resumo dos principais aprimoramentos e novos recursos da plataforma</p>
+                </div>
+              </div>
+              <span class="badge-atualizacoes-recente">Última Atualização</span>
+            </div>
+
+            <div class="grade-novidades">
+              <div class="item-novidade">
+                <div class="ponto-novidade"></div>
+                <div>
+                  <strong class="titulo-item-novidade">Kanban & Ações Rápidas</strong>
+                  <p class="desc-item-novidade">Cabeçalho otimizado com filtro de prioridade direto, ordenação avançada nas colunas (prioridade, nome e tempo) e desmarcação rápida de prioridades.</p>
+                </div>
+              </div>
+
+              <div class="item-novidade">
+                <div class="ponto-novidade"></div>
+                <div>
+                  <strong class="titulo-item-novidade">Histórico & Calendário Inteligente</strong>
+                  <p class="desc-item-novidade">Filtro histórico unificado (colunas, cards, clientes e colaboradores) com novo seletor visual de datas e horários em design acolhedor.</p>
+                </div>
+              </div>
+
+              <div class="item-novidade">
+                <div class="ponto-novidade"></div>
+                <div>
+                  <strong class="titulo-item-novidade">Gestão de Perfil & Permissões</strong>
+                  <p class="desc-item-novidade">Identificação pelo primeiro nome no cabeçalho e novo modal com dados cadastrais completos e relação detalhada de permissões por módulo.</p>
+                </div>
+              </div>
+
+              <div class="item-novidade">
+                <div class="ponto-novidade"></div>
+                <div>
+                  <strong class="titulo-item-novidade">Navegação Contextual & Conexões</strong>
+                  <p class="desc-item-novidade">Submenu exclusivo de Vendas na barra lateral com acesso direto ao Kanban e ao novo módulo de Conexões da plataforma.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </main>
+
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/configuracoes.js"></script>
+</body>
+</html>
