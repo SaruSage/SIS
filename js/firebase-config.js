@@ -22,6 +22,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-aut
 
 import { getFirestore } from
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFunctions } from
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 // ------------------------------------------------------------
 // CONFIGURAÇÃO DO PROJETO
 // Essas chaves identificam SEU projeto no Firebase.
@@ -47,4 +49,5 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const functions = getFunctions(app, "southamerica-east1");
 export { firebaseConfig };

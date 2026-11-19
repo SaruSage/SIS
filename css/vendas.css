@@ -1735,6 +1735,7 @@ input.cal-input-tempo,
   margin-bottom: 0 !important;
   box-shadow: none !important;
   box-sizing: border-box !important;
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 
