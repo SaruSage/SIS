@@ -77,9 +77,28 @@
       <div class="app-main">
 
         <header class="app-header">
-          <div class="header-busca">
-            <span class="icone-busca" data-icone="busca" data-tamanho="15"></span>
-            <input type="text" id="busca-global" placeholder="Buscar no sistema..." autocomplete="off">
+          <div id="controles-estoque" class="controles-estoque" hidden>
+            <div class="header-busca">
+              <span class="icone-busca" data-icone="busca" data-tamanho="15"></span>
+              <input type="text" id="busca-produto" placeholder="Buscar por código, nome, categoria ou descrição..." aria-label="Buscar produtos por código, nome, categoria ou descrição" autocomplete="off">
+            </div>
+            <select id="ordenar-por" class="seletor-ordenacao" title="Ordenar por" aria-label="Ordenar produtos por">
+              <option value="codigo" selected>Código (padrão)</option>
+              <option value="alfabetica">Ordem alfabética</option>
+              <option value="numerica">Ordem numérica</option>
+              <option value="categoria">Categoria</option>
+              <option value="maiorQtd">Maior quantidade</option>
+              <option value="menorQtd">Menor quantidade</option>
+              <option value="edicaoRecente">Edição mais recente</option>
+              <option value="edicaoAntiga">Edição mais antiga</option>
+            </select>
+            <div class="sanduiche-wrapper">
+              <button type="button" id="botao-menu-tabela" class="botao-sanduiche" title="Opções da tabela" aria-label="Opções da tabela"><span data-icone="sanduiche" data-tamanho="16"></span></button>
+              <div id="menu-tabela" class="menu-flutuante menu-tabela">
+                <button type="button" id="item-resetar" class="item-menu-perfil"><span data-icone="resetar" data-tamanho="14"></span> Resetar tabela</button>
+                <button type="button" id="item-editar-categorias" class="item-menu-perfil"><span data-icone="etiqueta" data-tamanho="14"></span> Editar categorias</button>
+              </div>
+            </div>
           </div>
 
           <div class="header-acoes">
@@ -138,30 +157,6 @@
             </div>
 
             <section id="painel-estoque" class="painel painel-branco visivel">
-              <div class="controles-tabela">
-                <input type="text" id="busca-produto" class="campo-busca-interno"
-                  placeholder="Buscar por código, nome, categoria ou descrição..." autocomplete="off">
-
-                <select id="ordenar-por" class="seletor-ordenacao" title="Ordenar por">
-                  <option value="codigo" selected>Código (padrão)</option>
-                  <option value="alfabetica">Ordem alfabética</option>
-                  <option value="numerica">Ordem numérica</option>
-                  <option value="categoria">Categoria</option>
-                  <option value="maiorQtd">Maior quantidade</option>
-                  <option value="menorQtd">Menor quantidade</option>
-                  <option value="edicaoRecente">Edição mais recente</option>
-                  <option value="edicaoAntiga">Edição mais antiga</option>
-                </select>
-
-                <div class="sanduiche-wrapper">
-                  <button type="button" id="botao-menu-tabela" class="botao-sanduiche" title="Opções"><span data-icone="sanduiche" data-tamanho="16"></span></button>
-                  <div id="menu-tabela" class="menu-flutuante menu-tabela">
-                    <button type="button" id="item-resetar" class="item-menu-perfil"><span data-icone="resetar" data-tamanho="14"></span> Resetar tabela</button>
-                    <button type="button" id="item-editar-categorias" class="item-menu-perfil"><span data-icone="etiqueta" data-tamanho="14"></span> Editar categorias</button>
-                  </div>
-                </div>
-              </div>
-
               <div class="wrapper-tabela">
                 <table class="tabela-produtos">
                   <thead>

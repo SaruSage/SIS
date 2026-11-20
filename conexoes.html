@@ -18,8 +18,8 @@
   <script>
     (function(){var t=localStorage.getItem("golden-tema")||"claro",f=localStorage.getItem("golden-fonte")||"normal";document.body.className="tema-"+t+" fonte-"+f;})();
   </script>
-  <div id="conteudo-protegido">
-    <div class="app-layout">
+  <div id="conteudo-protegido" class="oculto">
+    <div class="app-shell">
 
       <aside class="sidebar">
         <div class="sidebar-topo">
@@ -32,7 +32,7 @@
             <span class="nav-icone" data-icone="home"></span>
             <span class="nav-label">Home</span>
           </a>
-          <a href="vendas.html" class="nav-item ativo" data-cargos="vendas">
+          <a href="vendas.html" class="nav-item" data-cargos="vendas">
             <span class="nav-icone" data-icone="vendas"></span>
             <span class="nav-label">Vendas</span>
           </a>
@@ -94,7 +94,7 @@
         <header class="app-header">
           <div class="header-busca">
             <span class="icone-busca" data-icone="busca" data-tamanho="15"></span>
-            <input type="text" id="campo-busca" placeholder="Buscar conexões..." autocomplete="off">
+            <input type="text" id="campo-busca" placeholder="Buscar número, nome ou ID..." aria-label="Buscar conexões por número, nome ou ID" autocomplete="off">
           </div>
 
           <div class="header-acoes">

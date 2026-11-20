@@ -21,6 +21,7 @@ const statusIntegracao = document.getElementById("status-integracao");
 const formConectarWrap = document.getElementById("form-conectar-wrap");
 const formConectar = document.getElementById("form-conectar");
 const listaNumeros = document.getElementById("lista-numeros");
+const campoBusca = document.getElementById("campo-busca");
 const formBot = document.getElementById("form-bot");
 const seletorBot = document.getElementById("bot-numero");
 const botAtivo = document.getElementById("bot-ativo");
@@ -116,7 +117,17 @@ function renderizarNumeros() {
     return;
   }
 
-  numeros.forEach((numero) => {
+  const termo = campoBusca.value.trim().toLowerCase();
+  const filtrados = numeros.filter((numero) =>
+    [numero.displayPhoneNumber, numero.verifiedName, numero.phoneNumberId]
+      .some((valor) => String(valor || "").toLowerCase().includes(termo))
+  );
+  if (!filtrados.length) {
+    listaNumeros.appendChild(criarElemento("p", "texto-ajuda", "Nenhum número encontrado para a busca."));
+    return;
+  }
+
+  filtrados.forEach((numero) => {
     const cartao = criarElemento("article", "conexoes-numero");
     const informacoes = criarElemento("div");
     informacoes.appendChild(criarElemento("h3", "", numero.displayPhoneNumber || numero.phoneNumberId));
@@ -139,6 +150,8 @@ function renderizarNumeros() {
     listaNumeros.appendChild(cartao);
   });
 }
+
+campoBusca.addEventListener("input", renderizarNumeros);
 
 function preencherSeletores() {
   [seletorBot, ...document.querySelectorAll(".seletor-numeros")].forEach((seletor) => {

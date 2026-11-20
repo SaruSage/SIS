@@ -25,7 +25,7 @@ import { httpsCallable } from
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 import {
   collection, addDoc, updateDoc, doc, onSnapshot,
-  query, where, getDocs, serverTimestamp, deleteDoc
+  query, where, getDocs, serverTimestamp, deleteDoc, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 import {
@@ -3844,8 +3844,9 @@ modalOverlay.addEventListener("click", (evento) => {
 let colunaSendoArrastada = null;
 let colunaFlutuante = null;
 let indicadorPosicao = null;
-let temporizadorBotao = null;
 let temporizadorParada = null;
+let ponteiroColuna = null;
+let colunaPreparada = null;
 let ultimoMouseX = 0;
 let ultimoMouseY = 0;
 let deslocamentoColunaX = 0;
@@ -3865,7 +3866,7 @@ function iniciarSistemaReordenacao() {
   });
 
   kanban.addEventListener("selectstart", (evento) => {
-    if (temporizadorBotao || arrastoAtivo) {
+    if (ponteiroColuna !== null || arrastoAtivo) {
       evento.preventDefault();
     }
   });
@@ -3875,54 +3876,41 @@ function iniciarSistemaReordenacao() {
       evento.preventDefault();
       return;
     }
-    if (temporizadorBotao) {
-      clearTimeout(temporizadorBotao);
-      temporizadorBotao = null;
-    }
   });
 
-  kanban.addEventListener("mousedown", (evento) => {
-    if (evento.button !== 0) return;
-    if (arrastoAtivo) return;
+  kanban.addEventListener("pointerdown", (evento) => {
+    if (evento.button !== 0 || ponteiroColuna !== null || arrastoAtivo) return;
     const coluna = evento.target.closest(".coluna");
     if (!coluna) return;
     if (!evento.target.closest(".cabecalho-coluna") && !evento.target.closest(".corpo-coluna")) return;
     if (evento.target.closest("button")) return;
     if (evento.target.closest(".card-conversa")) return;
 
-    // Impede seleção de texto e arrasto nativo do navegador ao segurar o clique na coluna
     evento.preventDefault();
     if (window.getSelection) {
       window.getSelection().removeAllRanges();
-    }
-
-    if (temporizadorBotao) {
-      clearTimeout(temporizadorBotao);
-      temporizadorBotao = null;
     }
 
     inicioMouseX = evento.clientX;
     inicioMouseY = evento.clientY;
     ultimoMouseX = evento.clientX;
     ultimoMouseY = evento.clientY;
-    const colunaId = coluna.dataset.colunaId;
-
-    temporizadorBotao = setTimeout(() => {
-      temporizadorBotao = null;
-      const colunaAtual =
-        kanban.querySelector('.coluna[data-coluna-id="' + colunaId + '"]') || coluna;
-      if (!colunaAtual || !colunaAtual.isConnected) return;
-      iniciarArrastoColuna(colunaAtual, ultimoMouseX, ultimoMouseY);
-    }, 1000);
+    ponteiroColuna = evento.pointerId;
+    colunaPreparada = coluna;
+    kanban.setPointerCapture(evento.pointerId);
   });
 
-  document.addEventListener("mousemove", (evento) => {
-    if (temporizadorBotao && !arrastoAtivo) {
+  document.addEventListener("pointermove", (evento) => {
+    if (evento.pointerId !== ponteiroColuna) return;
+    if (!arrastoAtivo && colunaPreparada) {
       const dx = Math.abs(evento.clientX - inicioMouseX);
       const dy = Math.abs(evento.clientY - inicioMouseY);
-      if (dx > 10 || dy > 10) {
-        clearTimeout(temporizadorBotao);
-        temporizadorBotao = null;
+      if (dx > 5 || dy > 5) {
+        if (!colunaPreparada.isConnected) {
+          liberarPonteiroColuna();
+          return;
+        }
+        iniciarArrastoColuna(colunaPreparada, inicioMouseX, inicioMouseY);
       }
     }
     if (arrastoAtivo) {
@@ -3932,21 +3920,41 @@ function iniciarSistemaReordenacao() {
     }
   });
 
-  document.addEventListener("mouseup", () => {
-    if (temporizadorBotao) {
-      clearTimeout(temporizadorBotao);
-      temporizadorBotao = null;
-    }
+  document.addEventListener("pointerup", (evento) => {
+    if (evento.pointerId !== ponteiroColuna) return;
+    liberarPonteiroColuna();
     if (arrastoAtivo) {
       finalizarArrastoColuna();
     }
   });
 
+  document.addEventListener("pointercancel", (evento) => {
+    if (evento.pointerId !== ponteiroColuna) return;
+    liberarPonteiroColuna();
+    if (arrastoAtivo) cancelarArrastoColuna();
+  });
+
+  kanban.addEventListener("lostpointercapture", (evento) => {
+    if (evento.pointerId !== ponteiroColuna) return;
+    liberarPonteiroColuna();
+    if (arrastoAtivo) cancelarArrastoColuna();
+  });
+
   document.addEventListener("keydown", (evento) => {
-    if (evento.key === "Escape" && arrastoAtivo) {
-      cancelarArrastoColuna();
+    if (evento.key === "Escape" && ponteiroColuna !== null) {
+      liberarPonteiroColuna();
+      if (arrastoAtivo) cancelarArrastoColuna();
     }
   });
+}
+
+function liberarPonteiroColuna() {
+  const ponteiro = ponteiroColuna;
+  ponteiroColuna = null;
+  colunaPreparada = null;
+  if (ponteiro !== null && kanban.hasPointerCapture(ponteiro)) {
+    kanban.releasePointerCapture(ponteiro);
+  }
 }
 
 function iniciarArrastoColuna(coluna, x, y) {
@@ -3995,10 +4003,10 @@ function moverColunaFlutuante(evento) {
   const dx = Math.abs(evento.clientX - ultimoMouseX);
   const dy = Math.abs(evento.clientY - ultimoMouseY);
   const emMovimento = dx > 2 || dy > 2;
+  ultimoMouseX = evento.clientX;
+  ultimoMouseY = evento.clientY;
   if (emMovimento) {
     colunaFlutuante.classList.remove("parada");
-    ultimoMouseX = evento.clientX;
-    ultimoMouseY = evento.clientY;
     clearTimeout(temporizadorParada);
     temporizadorParada = setTimeout(() => {
       if (colunaFlutuante) colunaFlutuante.classList.add("parada");
@@ -4151,16 +4159,22 @@ async function finalizarArrastoColuna() {
   limparEstadoArrastoColuna();
 
   if (!ordemFinal || ordemFinal.length === 0) return;
+  if (ordemFinal.length !== ordemAnterior.length ||
+      ordemFinal.some((id) => !ordemAnterior.includes(id))) {
+    mostrarMensagem("As colunas mudaram durante o arrasto. Tente novamente.", "erro");
+    return;
+  }
 
   const mudouOrdem =
-    ordemFinal.length !== ordemAnterior.length ||
     ordemFinal.some((id, idx) => id !== ordemAnterior[idx]);
   if (!mudouOrdem) return;
 
   try {
+    const lote = writeBatch(db);
     for (let i = 0; i < ordemFinal.length; i++) {
-      await updateDoc(doc(db, "colunas", ordemFinal[i]), { ordem: i });
+      lote.update(doc(db, "colunas", ordemFinal[i]), { ordem: i });
     }
+    await lote.commit();
     await registrarHistoricoGlobal("reordenacao", {
       ordem: ordemFinal.map((id) => {
         const c = cacheColunas.find((x) => x.id === id);
@@ -4169,6 +4183,7 @@ async function finalizarArrastoColuna() {
     });
     mostrarMensagem("Colunas reordenadas.", "sucesso");
   } catch (erro) {
+    console.error("Erro ao reordenar as colunas:", erro);
     mostrarMensagem("Erro ao reordenar as colunas.", "erro");
   }
 }
