@@ -79,7 +79,7 @@
         <header class="app-header">
           <div class="header-busca">
             <span class="icone-busca" data-icone="busca" data-tamanho="15"></span>
-            <input type="text" id="busca-global" placeholder="Buscar no sistema..." autocomplete="off">
+            <input type="text" id="busca-usuarios" placeholder="Buscar por nome ou e-mail..." aria-label="Buscar usuários por nome ou e-mail" autocomplete="off">
           </div>
 
           <div class="header-acoes">
@@ -133,6 +133,7 @@
           <div class="painel-branco bloco-adm">
             <h2>Solicitações</h2>
             <div class="abas-adm">
+              <button type="button" class="aba-adm" data-filtro="todos">Todos</button>
               <button type="button" class="aba-adm ativa" data-filtro="pendente">Pendentes</button>
               <button type="button" class="aba-adm" data-filtro="aprovada">Aprovados</button>
               <button type="button" class="aba-adm" data-filtro="rejeitada">Rejeitados</button>

@@ -13,17 +13,19 @@
 // 5. Busca em tempo real por nome, telefone e e-mail.
 // 6. CRUD de colunas com fluxo de solicitação para vendedor.
 // 7. CRUD de cards com gerador aleatório (admin).
-// 8. Programação de mensagem (simulada) em colunas funcionárias.
+// 8. Programação de mensagens na API oficial do WhatsApp Business.
 // 9. Dois históricos: do card e da coluna.
 // 10. Histórico global mesclado, excluídos e configurações.
 // ============================================================
 
-import { auth, db } from "./firebase-config.js";
+import { auth, db, functions } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { httpsCallable } from
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 import {
   collection, addDoc, updateDoc, doc, onSnapshot,
-  query, where, getDocs, serverTimestamp, deleteDoc
+  query, where, getDocs, serverTimestamp, deleteDoc, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 import {
@@ -316,8 +318,6 @@ function escutarConfiguracoes() {
     }
   });
 }
-
-setInterval(verificarEnviosDeColuna, 30000);
 
 // ------------------------------------------------------------
 // RENDERIZAR O KANBAN COMPLETO
@@ -720,20 +720,31 @@ function criarCard(card, coluna) {
   div.appendChild(rodape);
   substituirIcones(div);
 
-  // Botão de programar (só em coluna funcionária)
-  if (coluna.tipo === "funcionaria") {
-    const botaoProgramar = document.createElement("button");
-    botaoProgramar.type = "button";
-    botaoProgramar.className = "botao-programar";
-    const jaProgramado = card.programacao && card.programacao.status !== "enviado";
-    if (jaProgramado) {
-      botaoProgramar.classList.add("programado");
-      botaoProgramar.innerHTML = '<span data-icone="relogio" data-tamanho="12"></span> Aguardando envio';
-    } else {
-      botaoProgramar.innerHTML = '<span data-icone="calendario" data-tamanho="12"></span> Programar mensagem';
-    }
-    botaoProgramar.addEventListener("click", () => abrirProgramacao(card, coluna));
-    div.appendChild(botaoProgramar);
+  const botaoProgramar = document.createElement("button");
+  botaoProgramar.type = "button";
+  botaoProgramar.className = "botao-programar";
+  const statusProgramacao = card.programacao && card.programacao.status;
+  if (statusProgramacao === "aguardando_envio") {
+    botaoProgramar.classList.add("programado");
+    botaoProgramar.innerHTML = '<span data-icone="relogio" data-tamanho="12"></span> Envio agendado';
+  } else if (statusProgramacao === "falha") {
+    botaoProgramar.innerHTML = '<span data-icone="calendario" data-tamanho="12"></span> Reprogramar envio';
+  } else {
+    botaoProgramar.innerHTML = '<span data-icone="calendario" data-tamanho="12"></span> Programar mensagem';
+  }
+  botaoProgramar.addEventListener("click", () => abrirProgramacao(card, coluna));
+  div.appendChild(botaoProgramar);
+
+  if (card.programacao && card.programacao.status === "falha" && card.programacao.erro) {
+    const falhaEnvio = document.createElement("p");
+    falhaEnvio.className = "aviso-card aviso-perdida";
+    falhaEnvio.textContent = "Falha no envio: " + card.programacao.erro;
+    div.appendChild(falhaEnvio);
+  } else if (card.entregaColunaErro) {
+    const falhaEnvio = document.createElement("p");
+    falhaEnvio.className = "aviso-card aviso-perdida";
+    falhaEnvio.textContent = "Falha na mensagem da coluna: " + card.entregaColunaErro;
+    div.appendChild(falhaEnvio);
   }
 
   // Drag
@@ -1171,111 +1182,142 @@ async function moverCard(cardId, colunaDestinoId) {
   }
 }
 
-async function concluirMensagemColuna(card, coluna) {
-  const cfg = coluna.configFuncionaria || {};
-  if (!cfg.colunaDestinoId) {
-    mostrarMensagem("A coluna não tem destino configurado.", "erro");
-    return;
-  }
-  if (!window.confirm(
-    "Marcar a mensagem desta coluna como entregue para este card?"
-  )) return;
-
-  try {
-    await updateDoc(doc(db, "cards", card.id), {
-      entregaColunaEm: serverTimestamp(),
-      ultimaAtividade: serverTimestamp()
-    });
-    await registrarHistoricoCard(card.id, "programacao", {
-      dataHora: "mensagem da coluna entregue manualmente"
-    });
-    mostrarMensagem("Mensagem da coluna marcada como entregue.", "sucesso");
-    await avaliarGatilhoConclusao(card.id);
-  } catch (erro) {
-    mostrarMensagem("Erro ao concluir a mensagem da coluna.", "erro");
-  }
-}
-
-async function avaliarGatilhoConclusao(cardId) {
-  const card = cacheCards.find((c) => c.id === cardId);
-  if (!card) return;
-
-  const coluna = cacheColunas.find((c) => c.id === card.colunaId);
-  if (!coluna || coluna.tipo !== "funcionaria") return;
-
-  const cfg = coluna.configFuncionaria || {};
-  if (!cfg.colunaDestinoId) return;
-
-  const precisaColuna = cfg.moverAposMensagemColuna === true;
-  const precisaCard = cfg.moverAposMensagemCard === true;
-
-  const colunaEntregue = !!card.entregaColunaEm;
-  const cardEntregue = !!(card.programacao && card.programacao.status === "enviado");
-
-  const condicaoColuna = !precisaColuna || colunaEntregue;
-  const condicaoCard = !precisaCard || cardEntregue;
-
-  if (!condicaoColuna || !condicaoCard) return;
-
-  const destino = cacheColunas.find((c) => c.id === cfg.colunaDestinoId);
-  if (!destino) return;
-
-  try {
-    await updateDoc(doc(db, "cards", cardId), {
-      colunaId: cfg.colunaDestinoId,
-      entregaColunaEm: null,
-      ultimaAtividade: serverTimestamp()
-    });
-    await registrarHistoricoCard(cardId, "movimentacao", {
-      de: coluna.nome,
-      para: destino.nome
-    });
-    await registrarHistoricoColuna(cfg.colunaDestinoId, "entrada", card, {
-      colunaOrigemId: coluna.id,
-      colunaDestinoId: cfg.colunaDestinoId
-    });
-    await registrarHistoricoColuna(coluna.id, "saida", card, {
-      colunaOrigemId: coluna.id,
-      colunaDestinoId: cfg.colunaDestinoId
-    });
-    mostrarMensagem("Card movido automaticamente para " + destino.nome + ".", "sucesso");
-  } catch (erro) {
-    mostrarMensagem("Erro ao mover o card automaticamente.", "erro");
-  }
-}
-
-async function concluirMensagemCard(card) {
-  if (!window.confirm("Marcar a mensagem deste card como enviada?")) return;
-  try {
-    await updateDoc(doc(db, "cards", card.id), {
-      programacao: {
-        ...card.programacao,
-        status: "enviado",
-        enviadoEm: serverTimestamp()
-      },
-      ultimaAtividade: serverTimestamp()
-    });
-    await registrarHistoricoCard(card.id, "programacao", {
-      dataHora: "mensagem do card marcada como enviada"
-    });
-    mostrarMensagem("Mensagem do card marcada como enviada.", "sucesso");
-    await avaliarGatilhoConclusao(card.id);
-  } catch (erro) {
-    mostrarMensagem("Erro ao concluir a mensagem do card.", "erro");
-  }
-}
-
 // ------------------------------------------------------------
-// ACESSAR CONVERSA (abre WhatsApp)
+// CONVERSA INTEGRADA PELA API OFICIAL DO WHATSAPP
 // ------------------------------------------------------------
 async function acessarConversa(card) {
-  const telefone = (card.telefone || "").replace(/\D/g, "");
-  if (!telefone) {
+  if (!card.telefone) {
     mostrarMensagem("Este card não tem telefone cadastrado.", "erro");
     return;
   }
+  const caixa = document.createElement("div");
+  caixa.className = "modal-interno whatsapp-conversa";
+  const titulo = document.createElement("h3");
+  titulo.textContent = "Conversa com " + (card.nomeConta || card.telefone);
+  caixa.appendChild(titulo);
+  const lista = document.createElement("div");
+  lista.className = "whatsapp-conversa-lista";
+  lista.textContent = "Carregando mensagens...";
+  caixa.appendChild(lista);
+  const formulario = document.createElement("form");
+  formulario.className = "whatsapp-conversa-form";
+  formulario.innerHTML =
+    "<label>Número de origem<select id='conversa-numero' required></select></label>" +
+    "<label>Tipo de mensagem<select id='conversa-tipo'><option value='text'>Mensagem de texto (janela de 24h)</option><option value='template'>Modelo aprovado</option></select></label>" +
+    "<label class='conversa-texto-wrap'>Mensagem<textarea id='conversa-texto' rows='3' maxlength='4096'></textarea></label>" +
+    "<div class='conversa-template-wrap' hidden>" +
+      "<label>Nome do modelo aprovado<input id='conversa-template' placeholder='nome_do_modelo'></label>" +
+      "<label>Idioma do modelo<input id='conversa-idioma' value='pt_BR'></label>" +
+      "<label>Parâmetros do corpo (um por linha)<textarea id='conversa-variaveis' rows='2'></textarea></label>" +
+    "</div>";
+  const mensagemStatus = document.createElement("p");
+  mensagemStatus.className = "texto-ajuda";
+  formulario.appendChild(mensagemStatus);
+  const linha = document.createElement("div");
+  linha.className = "linha-botoes-modal";
+  const fechar = document.createElement("button");
+  fechar.type = "button";
+  fechar.textContent = "Fechar";
+  fechar.className = "botao-modal botao-modal-secundario";
+  fechar.addEventListener("click", fecharModal);
+  const enviar = document.createElement("button");
+  enviar.type = "submit";
+  enviar.textContent = "Enviar pelo WhatsApp";
+  enviar.className = "botao-modal";
+  linha.append(fechar, enviar);
+  formulario.appendChild(linha);
+  caixa.appendChild(formulario);
+  abrirModal(caixa);
+
+  const tipo = formulario.querySelector("#conversa-tipo");
+  const templateWrap = formulario.querySelector(".conversa-template-wrap");
+  const textoWrap = formulario.querySelector(".conversa-texto-wrap");
+  const inboundMs = card.lastInboundAt && card.lastInboundAt.toMillis
+    ? card.lastInboundAt.toMillis()
+    : card.lastInboundAt && card.lastInboundAt.seconds
+      ? card.lastInboundAt.seconds * 1000
+      : 0;
+  if (!inboundMs || Date.now() - inboundMs > 24 * 60 * 60 * 1000) {
+    tipo.value = "template";
+    templateWrap.hidden = false;
+    textoWrap.hidden = true;
+  }
+  tipo.addEventListener("change", () => {
+    const usaModelo = tipo.value === "template";
+    templateWrap.hidden = !usaModelo;
+    textoWrap.hidden = usaModelo;
+  });
+
+  try {
+    const [resultadoMensagens, resultadoNumeros] = await Promise.all([
+      httpsCallable(functions, "getWhatsAppMessages")({ cardId: card.id }),
+      httpsCallable(functions, "getWhatsAppConnections")({})
+    ]);
+    const mensagens = resultadoMensagens.data.messages || [];
+    const numeros = (resultadoNumeros.data.numbers || []).filter((numero) => numero.active);
+    const seletor = formulario.querySelector("#conversa-numero");
+    seletor.replaceChildren(new Option("Selecione um número", ""));
+    numeros.forEach((numero) => seletor.add(new Option(numero.displayPhoneNumber || numero.phoneNumberId, numero.phoneNumberId)));
+    if (numeros.some((numero) => numero.phoneNumberId === card.whatsappPhoneNumberId)) {
+      seletor.value = card.whatsappPhoneNumberId;
+    } else if (numeros.length === 1) {
+      seletor.value = numeros[0].phoneNumberId;
+    }
+
+    lista.replaceChildren();
+    if (!mensagens.length) {
+      lista.textContent = "Ainda não há mensagens recebidas pela integração.";
+    } else {
+      mensagens.forEach((mensagem) => {
+        const linhaMensagem = document.createElement("div");
+        linhaMensagem.className = "whatsapp-mensagem " + (mensagem.direction === "outgoing" ? "whatsapp-mensagem-saida" : "whatsapp-mensagem-entrada");
+        const corpo = document.createElement("p");
+        corpo.textContent = mensagem.text || "[Mensagem sem texto]";
+        linhaMensagem.appendChild(corpo);
+        const hora = document.createElement("small");
+        hora.textContent = (mensagem.timestamp ? new Date(mensagem.timestamp).toLocaleString("pt-BR") : "") +
+          (mensagem.status ? " · " + mensagem.status : "");
+        linhaMensagem.appendChild(hora);
+        lista.appendChild(linhaMensagem);
+      });
+    }
+  } catch (erro) {
+    lista.textContent = "Não foi possível carregar as mensagens: " + (erro.message || "erro desconhecido");
+  }
+
+  formulario.addEventListener("submit", async (evento) => {
+    evento.preventDefault();
+    const phoneNumberId = formulario.querySelector("#conversa-numero").value;
+    const mode = tipo.value;
+    const dados = {
+      cardId: card.id,
+      phoneNumberId,
+      mode,
+      text: formulario.querySelector("#conversa-texto").value.trim(),
+      templateName: formulario.querySelector("#conversa-template").value.trim(),
+      templateLanguage: formulario.querySelector("#conversa-idioma").value.trim() || "pt_BR",
+      templateVariables: formulario.querySelector("#conversa-variaveis").value
+    };
+    if (!phoneNumberId) {
+      mensagemStatus.textContent = "Selecione um número vinculado.";
+      return;
+    }
+    enviar.disabled = true;
+    mensagemStatus.textContent = "Enviando pela API oficial...";
+    try {
+      await httpsCallable(functions, "sendWhatsAppMessage")(dados);
+      mensagemStatus.textContent = "Mensagem aceita pela Meta.";
+      formulario.querySelector("#conversa-texto").value = "";
+      await registrarHistoricoCard(card.id, "mensagemWhatsapp", { tipo: mode });
+      fecharModal();
+      await acessarConversa(card);
+    } catch (erro) {
+      mensagemStatus.textContent = erro.message || "Falha ao enviar mensagem.";
+    } finally {
+      enviar.disabled = false;
+    }
+  });
   await registrarHistoricoCard(card.id, "acesso", {});
-  window.open("https://wa.me/" + telefone, "_blank");
 }
 
 // ------------------------------------------------------------
@@ -1544,25 +1586,6 @@ function abrirMenuCard(botao, card, coluna) {
       acao: () => abrirHistoricoCard(card)
     }
   ];
-
-  const colunaDoCard = cacheColunas.find((c) => c.id === card.colunaId);
-  const ehColunaFuncionaria = colunaDoCard && colunaDoCard.tipo === "funcionaria";
-
-  if (ehColunaFuncionaria) {
-    opcoes.push({
-      icone: "check",
-      texto: "Concluir mensagem da coluna",
-      acao: () => concluirMensagemColuna(card, colunaDoCard)
-    });
-  }
-
-  if (card.programacao && card.programacao.status === "aguardando_envio") {
-    opcoes.push({
-      icone: "check",
-      texto: "Marcar mensagem como enviada",
-      acao: () => concluirMensagemCard(card)
-    });
-  }
 
   // Divisor para prioridades
   opcoes.push({ divisor: true });
@@ -2016,7 +2039,7 @@ async function solicitarExclusaoColuna(coluna) {
 // ------------------------------------------------------------
 // CONFIGURAR COLUNA FUNCIONÁRIA
 // ------------------------------------------------------------
-function abrirConfiguracaoFuncionaria(coluna) {
+async function abrirConfiguracaoFuncionaria(coluna) {
   const cfg = coluna.configFuncionaria || {};
   const caixa = document.createElement("div");
   caixa.className = "modal-interno";
@@ -2033,16 +2056,25 @@ function abrirConfiguracaoFuncionaria(coluna) {
 
   caixa.innerHTML =
     "<h3>Configurar coluna funcionária</h3>" +
+    "<label>Número de origem</label>" +
+    '<select id="cfg-numero"><option value="">Carregando números...</option></select>' +
+    "<label>Tipo de mensagem da coluna</label>" +
+    '<select id="cfg-tipo"><option value="text">Texto (janela de atendimento de 24h)</option><option value="template">Modelo aprovado pela Meta</option></select>' +
     "<label>Mensagem automática (WhatsApp)</label>" +
     '<textarea id="cfg-mensagem"></textarea>' +
+    "<label>Nome do modelo aprovado</label>" +
+    '<input type="text" id="cfg-template" placeholder="nome_do_modelo">' +
+    "<label>Idioma do modelo</label>" +
+    '<input type="text" id="cfg-idioma" value="pt_BR">' +
+    "<label>Parâmetros do corpo (um por linha)</label>" +
+    '<textarea id="cfg-variaveis" rows="2"></textarea>' +
     "<label>Data do envio da mensagem da coluna</label>" +
     '<input type="date" id="cfg-data">' +
     "<label>Horário do envio</label>" +
     '<input type="time" id="cfg-hora">' +
     '<p class="texto-ajuda" style="margin-top:8px;">' +
-      "Todos os cards desta coluna receberão esta mensagem no horário definido acima, " +
-      "independentemente das opções marcadas abaixo. As opções definem apenas quando o card " +
-      "será movido. Mensagens programadas individualmente em cada card continuam valendo em paralelo." +
+      "A mensagem será enviada pela Cloud API para cada card que estiver nesta coluna no horário programado. " +
+      "Texto livre só pode ser enviado na janela de 24 horas após a última mensagem do cliente; fora dela, use um modelo aprovado." +
     "</p>" +
     "<label>Gatilho de conclusão</label>" +
     '<div class="bloco-checkboxes">' +
@@ -2061,16 +2093,44 @@ function abrirConfiguracaoFuncionaria(coluna) {
     "<label>Coluna de destino ao concluir</label>" +
     '<select id="cfg-destino">' + opcoesDestino + "</select>" +
     '<p class="texto-ajuda" style="margin-top:12px;">' +
-      "Modo de detecção: manual (o vendedor marca como concluída). " +
-      "A detecção automática por IA será ativada em versão futura." +
+    "A coluna transfere o card automaticamente após o envio real da mensagem, de acordo com os gatilhos selecionados." +
     "</p>";
 
   caixa.querySelector("#cfg-mensagem").value = cfg.mensagemWhatsapp || "";
-  if (cfg.dataHoraColuna && cfg.dataHoraColuna.seconds) {
-    const d = new Date(cfg.dataHoraColuna.seconds * 1000);
+  caixa.querySelector("#cfg-tipo").value = cfg.tipoMensagem === "template" ? "template" : "text";
+  caixa.querySelector("#cfg-template").value = cfg.templateName || "";
+  caixa.querySelector("#cfg-idioma").value = cfg.templateLanguage || "pt_BR";
+  caixa.querySelector("#cfg-variaveis").value = (cfg.templateVariables || []).join("\n");
+  if (cfg.dataHoraColuna) {
+    const d = cfg.dataHoraColuna.toDate
+    ? cfg.dataHoraColuna.toDate()
+    : new Date(cfg.dataHoraColuna.seconds ? cfg.dataHoraColuna.seconds * 1000 : cfg.dataHoraColuna);
     caixa.querySelector("#cfg-data").value = d.toISOString().slice(0, 10);
     caixa.querySelector("#cfg-hora").value = d.toTimeString().slice(0, 5);
   }
+
+  try {
+    const conexoes = await httpsCallable(functions, "getWhatsAppConnections")({});
+    const numeroSelect = caixa.querySelector("#cfg-numero");
+    numeroSelect.replaceChildren(new Option("Selecione um número", ""));
+    (conexoes.data.numbers || []).filter((numero) => numero.active).forEach((numero) => {
+    numeroSelect.add(new Option(numero.displayPhoneNumber || numero.phoneNumberId, numero.phoneNumberId));
+    });
+    numeroSelect.value = cfg.phoneNumberId || "";
+  } catch (erro) {
+    mostrarMensagem("Não foi possível carregar os números vinculados: " + erro.message, "erro");
+  }
+
+  const tipoMensagem = caixa.querySelector("#cfg-tipo");
+  const atualizarCamposTipo = () => {
+    const usaModelo = tipoMensagem.value === "template";
+    caixa.querySelector("#cfg-mensagem").disabled = usaModelo;
+    caixa.querySelector("#cfg-template").disabled = !usaModelo;
+    caixa.querySelector("#cfg-idioma").disabled = !usaModelo;
+    caixa.querySelector("#cfg-variaveis").disabled = !usaModelo;
+  };
+  tipoMensagem.addEventListener("change", atualizarCamposTipo);
+  atualizarCamposTipo();
 
   const botaoCancelar = document.createElement("button");
   botaoCancelar.textContent = "Cancelar";
@@ -2084,6 +2144,12 @@ function abrirConfiguracaoFuncionaria(coluna) {
     const mensagemWhatsapp = caixa.querySelector("#cfg-mensagem").value.trim();
     const data = caixa.querySelector("#cfg-data").value;
     const hora = caixa.querySelector("#cfg-hora").value;
+    const phoneNumberId = caixa.querySelector("#cfg-numero").value;
+    const tipo = caixa.querySelector("#cfg-tipo").value;
+    const templateName = caixa.querySelector("#cfg-template").value.trim();
+    const templateLanguage = caixa.querySelector("#cfg-idioma").value.trim() || "pt_BR";
+    const templateVariables = caixa.querySelector("#cfg-variaveis").value
+      .split(/\r?\n/).map((valor) => valor.trim()).filter(Boolean);
     const colunaDestinoId = caixa.querySelector("#cfg-destino").value;
     const moverAposMensagemColuna = caixa.querySelector("#cfg-mover-coluna").checked;
     const moverAposMensagemCard = caixa.querySelector("#cfg-mover-card").checked;
@@ -2092,14 +2158,31 @@ function abrirConfiguracaoFuncionaria(coluna) {
       mostrarMensagem("Selecione a coluna de destino.", "erro");
       return;
     }
+    if (!phoneNumberId) {
+      mostrarMensagem("Selecione o número WhatsApp de origem.", "erro");
+      return;
+    }
+    if (!data || !hora) {
+      mostrarMensagem("Informe a data e o horário do envio da coluna.", "erro");
+      return;
+    }
+    if (tipo === "template" && !templateName) {
+      mostrarMensagem("Informe o nome do modelo aprovado pela Meta.", "erro");
+      return;
+    }
+    if (tipo === "text" && !mensagemWhatsapp) {
+      mostrarMensagem("Escreva a mensagem da coluna.", "erro");
+      return;
+    }
     if (!moverAposMensagemColuna && !moverAposMensagemCard) {
       mostrarMensagem("Marque ao menos um gatilho de conclusão.", "erro");
       return;
     }
 
-    let dataHoraColuna = null;
-    if (data && hora) {
-      dataHoraColuna = new Date(data + "T" + hora);
+    const dataHoraColuna = new Date(data + "T" + hora);
+    if (Number.isNaN(dataHoraColuna.getTime()) || dataHoraColuna.getTime() <= Date.now()) {
+      mostrarMensagem("O envio da coluna deve estar programado para o futuro.", "erro");
+      return;
     }
 
     botaoSalvar.disabled = true;
@@ -2107,11 +2190,16 @@ function abrirConfiguracaoFuncionaria(coluna) {
       await updateDoc(doc(db, "colunas", coluna.id), {
         configFuncionaria: {
           mensagemWhatsapp,
+          tipoMensagem: tipo,
+          templateName: tipo === "template" ? templateName : "",
+          templateLanguage,
+          templateVariables,
+          phoneNumberId,
           dataHoraColuna,
           moverAposMensagemColuna,
           moverAposMensagemCard,
           colunaDestinoId,
-          modoDeteccao: "manual",
+          modoDeteccao: "automatico",
           configuradoPor: usuarioAtual
         }
       });
@@ -2418,19 +2506,56 @@ function abrirProgramacao(card, coluna) {
   caixa.className = "modal-interno";
   caixa.innerHTML =
     "<h3>Programar mensagem</h3>" +
-    '<p class="texto-ajuda">Envio simulado nesta versão. O texto e as imagens ficam registrados no card.</p>' +
+    '<p class="texto-ajuda">O envio será feito pela API oficial da Meta no horário escolhido. Texto livre exige uma janela de atendimento aberta; fora dela, use um modelo aprovado.</p>' +
+    "<label>Número de origem</label><select id='p-numero' required></select>" +
+    "<label>Tipo de mensagem</label>" +
+    "<select id='p-tipo'><option value='text'>Texto (janela de atendimento de 24h)</option><option value='template'>Modelo aprovado pela Meta</option></select>" +
     "<label>Data do envio</label><input type='date' id='p-data'>" +
     "<label>Horário</label><input type='time' id='p-hora'>" +
-    "<label>Mensagem</label><textarea id='p-texto'></textarea>" +
-    "<label>Imagens (nomes dos arquivos)</label><input type='text' id='p-imagens' placeholder='foto1.jpg, foto2.png'>";
+    "<label>Mensagem</label><textarea id='p-texto' maxlength='4096'></textarea>" +
+    "<label>Nome do modelo aprovado</label><input type='text' id='p-template' placeholder='nome_do_modelo'>" +
+    "<label>Idioma do modelo</label><input type='text' id='p-idioma' value='pt_BR'>" +
+    "<label>Parâmetros do corpo (um por linha)</label><textarea id='p-variaveis' rows='2'></textarea>";
 
   if (prog.dataHora) {
-    const d = new Date(prog.dataHora.seconds * 1000);
+    const d = prog.dataHora.toDate
+      ? prog.dataHora.toDate()
+      : new Date(prog.dataHora.seconds ? prog.dataHora.seconds * 1000 : prog.dataHora);
     caixa.querySelector("#p-data").value = d.toISOString().slice(0, 10);
     caixa.querySelector("#p-hora").value = d.toTimeString().slice(0, 5);
   }
   caixa.querySelector("#p-texto").value = prog.texto || "";
-  caixa.querySelector("#p-imagens").value = (prog.imagens || []).join(", ");
+  caixa.querySelector("#p-tipo").value = prog.tipoMensagem === "template" ? "template" : "text";
+  caixa.querySelector("#p-template").value = prog.templateName || "";
+  caixa.querySelector("#p-idioma").value = prog.templateLanguage || "pt_BR";
+  caixa.querySelector("#p-variaveis").value = (prog.templateVariables || []).join("\n");
+
+  const tipoMensagem = caixa.querySelector("#p-tipo");
+  const atualizarCamposTipo = () => {
+    const usaModelo = tipoMensagem.value === "template";
+    caixa.querySelector("#p-texto").disabled = usaModelo;
+    caixa.querySelector("#p-template").disabled = !usaModelo;
+    caixa.querySelector("#p-idioma").disabled = !usaModelo;
+    caixa.querySelector("#p-variaveis").disabled = !usaModelo;
+  };
+  tipoMensagem.addEventListener("change", atualizarCamposTipo);
+  atualizarCamposTipo();
+
+  httpsCallable(functions, "getWhatsAppConnections")({})
+    .then((resultado) => {
+      const seletor = caixa.querySelector("#p-numero");
+      seletor.replaceChildren(new Option("Selecione um número", ""));
+      const numeros = (resultado.data.numbers || []).filter((numero) => numero.active);
+      numeros.forEach((numero) => seletor.add(new Option(numero.displayPhoneNumber || numero.phoneNumberId, numero.phoneNumberId)));
+      if (numeros.some((numero) => numero.phoneNumberId === (prog.phoneNumberId || card.whatsappPhoneNumberId))) {
+        seletor.value = prog.phoneNumberId || card.whatsappPhoneNumberId;
+      } else if (numeros.length === 1) {
+        seletor.value = numeros[0].phoneNumberId;
+      }
+    })
+    .catch((erro) => {
+      mostrarMensagem("Não foi possível carregar os números vinculados: " + erro.message, "erro");
+    });
 
   const botaoCancelar = document.createElement("button");
   botaoCancelar.textContent = "Cancelar";
@@ -2444,42 +2569,50 @@ function abrirProgramacao(card, coluna) {
     const data = caixa.querySelector("#p-data").value;
     const hora = caixa.querySelector("#p-hora").value;
     const texto = caixa.querySelector("#p-texto").value.trim();
-    const imagensRaw = caixa.querySelector("#p-imagens").value.trim();
+    const phoneNumberId = caixa.querySelector("#p-numero").value;
+    const tipo = tipoMensagem.value;
+    const templateName = caixa.querySelector("#p-template").value.trim();
+    const templateLanguage = caixa.querySelector("#p-idioma").value.trim() || "pt_BR";
+    const templateVariables = caixa.querySelector("#p-variaveis").value;
 
     if (!data || !hora) {
       mostrarMensagem("Informe data e horário.", "erro");
       return;
     }
-    if (!texto) {
+    if (!phoneNumberId) {
+      mostrarMensagem("Selecione o número WhatsApp de origem.", "erro");
+      return;
+    }
+    if (tipo === "text" && !texto) {
       mostrarMensagem("Escreva a mensagem.", "erro");
       return;
     }
-
+    if (tipo === "template" && !templateName) {
+      mostrarMensagem("Informe o nome do modelo aprovado pela Meta.", "erro");
+      return;
+    }
     const dataHora = new Date(data + "T" + hora);
-    const imagens = imagensRaw
-      ? imagensRaw.split(",").map((s) => s.trim()).filter(Boolean)
-      : [];
+    if (Number.isNaN(dataHora.getTime()) || dataHora.getTime() <= Date.now()) {
+      mostrarMensagem("O envio deve estar programado para o futuro.", "erro");
+      return;
+    }
 
     botaoSalvar.disabled = true;
     try {
-      await updateDoc(doc(db, "cards", card.id), {
-        programacao: {
-          texto: texto,
-          imagens: imagens,
-          dataHora: dataHora,
-          status: "aguardando_envio",
-          programadoPor: usuarioAtual
-        }
+      await httpsCallable(functions, "scheduleWhatsAppMessage")({
+        cardId: card.id,
+        phoneNumberId,
+        mode: tipo,
+        text: texto,
+        templateName,
+        templateLanguage,
+        templateVariables,
+        scheduledAt: dataHora.getTime()
       });
-      await registrarHistoricoCard(card.id, "programacao", {
-        dataHora: dataHora.toLocaleString("pt-BR"),
-        imagens: imagens.length
-      });
-      mostrarMensagem("Mensagem programada.", "sucesso");
+      mostrarMensagem("Mensagem programada para " + dataHora.toLocaleString("pt-BR") + ".", "sucesso");
       fecharModal();
-      await avaliarGatilhoConclusao(card.id);
     } catch (erro) {
-      mostrarMensagem("Erro ao programar a mensagem.", "erro");
+      mostrarMensagem(erro.message || "Erro ao programar a mensagem.", "erro");
     } finally {
       botaoSalvar.disabled = false;
     }
@@ -3254,6 +3387,7 @@ function criarCartaoEvento(ev) {
       break;
     case "marcacao": descricao = "Marcado como " + (ev.detalhes?.status || "—"); break;
     case "acesso": descricao = "Conversa acessada"; break;
+    case "mensagemWhatsapp": descricao = "Mensagem enviada pela integração do WhatsApp"; break;
     case "programacao":
       descricao = "Mensagem programada para " + (ev.detalhes?.dataHora || "—");
       break;
@@ -3704,47 +3838,15 @@ modalOverlay.addEventListener("click", (evento) => {
   if (evento.target === modalOverlay) fecharModal();
 });
 
-function verificarEnviosDeColuna() {
-  const agora = Date.now();
-
-  cacheColunas.forEach(async (coluna) => {
-    if (coluna.tipo !== "funcionaria") return;
-
-    const cfg = coluna.configFuncionaria || {};
-    if (!cfg.dataHoraColuna || !cfg.dataHoraColuna.seconds) return;
-
-    const horarioEnvio = cfg.dataHoraColuna.seconds * 1000;
-    if (agora < horarioEnvio) return;
-
-    const cardsDaColuna = cacheCards.filter((c) => c.colunaId === coluna.id);
-
-    for (const card of cardsDaColuna) {
-      if (card.entregaColunaEm) continue;
-
-      try {
-        await updateDoc(doc(db, "cards", card.id), {
-          entregaColunaEm: serverTimestamp(),
-          ultimaAtividade: serverTimestamp()
-        });
-        await registrarHistoricoCard(card.id, "programacao", {
-          dataHora: "mensagem da coluna enviada automaticamente"
-        });
-        await avaliarGatilhoConclusao(card.id);
-      } catch (erro) {
-        // Silencioso: falha em um card não deve travar os demais.
-      }
-    }
-  });
-}
-
 // ------------------------------------------------------------
 // REORDENAÇÃO DE COLUNAS (somente administrador)
 // ------------------------------------------------------------
 let colunaSendoArrastada = null;
 let colunaFlutuante = null;
 let indicadorPosicao = null;
-let temporizadorBotao = null;
 let temporizadorParada = null;
+let ponteiroColuna = null;
+let colunaPreparada = null;
 let ultimoMouseX = 0;
 let ultimoMouseY = 0;
 let deslocamentoColunaX = 0;
@@ -3764,7 +3866,7 @@ function iniciarSistemaReordenacao() {
   });
 
   kanban.addEventListener("selectstart", (evento) => {
-    if (temporizadorBotao || arrastoAtivo) {
+    if (ponteiroColuna !== null || arrastoAtivo) {
       evento.preventDefault();
     }
   });
@@ -3774,54 +3876,41 @@ function iniciarSistemaReordenacao() {
       evento.preventDefault();
       return;
     }
-    if (temporizadorBotao) {
-      clearTimeout(temporizadorBotao);
-      temporizadorBotao = null;
-    }
   });
 
-  kanban.addEventListener("mousedown", (evento) => {
-    if (evento.button !== 0) return;
-    if (arrastoAtivo) return;
+  kanban.addEventListener("pointerdown", (evento) => {
+    if (evento.button !== 0 || ponteiroColuna !== null || arrastoAtivo) return;
     const coluna = evento.target.closest(".coluna");
     if (!coluna) return;
     if (!evento.target.closest(".cabecalho-coluna") && !evento.target.closest(".corpo-coluna")) return;
     if (evento.target.closest("button")) return;
     if (evento.target.closest(".card-conversa")) return;
 
-    // Impede seleção de texto e arrasto nativo do navegador ao segurar o clique na coluna
     evento.preventDefault();
     if (window.getSelection) {
       window.getSelection().removeAllRanges();
-    }
-
-    if (temporizadorBotao) {
-      clearTimeout(temporizadorBotao);
-      temporizadorBotao = null;
     }
 
     inicioMouseX = evento.clientX;
     inicioMouseY = evento.clientY;
     ultimoMouseX = evento.clientX;
     ultimoMouseY = evento.clientY;
-    const colunaId = coluna.dataset.colunaId;
-
-    temporizadorBotao = setTimeout(() => {
-      temporizadorBotao = null;
-      const colunaAtual =
-        kanban.querySelector('.coluna[data-coluna-id="' + colunaId + '"]') || coluna;
-      if (!colunaAtual || !colunaAtual.isConnected) return;
-      iniciarArrastoColuna(colunaAtual, ultimoMouseX, ultimoMouseY);
-    }, 1000);
+    ponteiroColuna = evento.pointerId;
+    colunaPreparada = coluna;
+    kanban.setPointerCapture(evento.pointerId);
   });
 
-  document.addEventListener("mousemove", (evento) => {
-    if (temporizadorBotao && !arrastoAtivo) {
+  document.addEventListener("pointermove", (evento) => {
+    if (evento.pointerId !== ponteiroColuna) return;
+    if (!arrastoAtivo && colunaPreparada) {
       const dx = Math.abs(evento.clientX - inicioMouseX);
       const dy = Math.abs(evento.clientY - inicioMouseY);
-      if (dx > 10 || dy > 10) {
-        clearTimeout(temporizadorBotao);
-        temporizadorBotao = null;
+      if (dx > 5 || dy > 5) {
+        if (!colunaPreparada.isConnected) {
+          liberarPonteiroColuna();
+          return;
+        }
+        iniciarArrastoColuna(colunaPreparada, inicioMouseX, inicioMouseY);
       }
     }
     if (arrastoAtivo) {
@@ -3831,21 +3920,41 @@ function iniciarSistemaReordenacao() {
     }
   });
 
-  document.addEventListener("mouseup", () => {
-    if (temporizadorBotao) {
-      clearTimeout(temporizadorBotao);
-      temporizadorBotao = null;
-    }
+  document.addEventListener("pointerup", (evento) => {
+    if (evento.pointerId !== ponteiroColuna) return;
+    liberarPonteiroColuna();
     if (arrastoAtivo) {
       finalizarArrastoColuna();
     }
   });
 
+  document.addEventListener("pointercancel", (evento) => {
+    if (evento.pointerId !== ponteiroColuna) return;
+    liberarPonteiroColuna();
+    if (arrastoAtivo) cancelarArrastoColuna();
+  });
+
+  kanban.addEventListener("lostpointercapture", (evento) => {
+    if (evento.pointerId !== ponteiroColuna) return;
+    liberarPonteiroColuna();
+    if (arrastoAtivo) cancelarArrastoColuna();
+  });
+
   document.addEventListener("keydown", (evento) => {
-    if (evento.key === "Escape" && arrastoAtivo) {
-      cancelarArrastoColuna();
+    if (evento.key === "Escape" && ponteiroColuna !== null) {
+      liberarPonteiroColuna();
+      if (arrastoAtivo) cancelarArrastoColuna();
     }
   });
+}
+
+function liberarPonteiroColuna() {
+  const ponteiro = ponteiroColuna;
+  ponteiroColuna = null;
+  colunaPreparada = null;
+  if (ponteiro !== null && kanban.hasPointerCapture(ponteiro)) {
+    kanban.releasePointerCapture(ponteiro);
+  }
 }
 
 function iniciarArrastoColuna(coluna, x, y) {
@@ -3894,10 +4003,10 @@ function moverColunaFlutuante(evento) {
   const dx = Math.abs(evento.clientX - ultimoMouseX);
   const dy = Math.abs(evento.clientY - ultimoMouseY);
   const emMovimento = dx > 2 || dy > 2;
+  ultimoMouseX = evento.clientX;
+  ultimoMouseY = evento.clientY;
   if (emMovimento) {
     colunaFlutuante.classList.remove("parada");
-    ultimoMouseX = evento.clientX;
-    ultimoMouseY = evento.clientY;
     clearTimeout(temporizadorParada);
     temporizadorParada = setTimeout(() => {
       if (colunaFlutuante) colunaFlutuante.classList.add("parada");
@@ -4050,16 +4159,22 @@ async function finalizarArrastoColuna() {
   limparEstadoArrastoColuna();
 
   if (!ordemFinal || ordemFinal.length === 0) return;
+  if (ordemFinal.length !== ordemAnterior.length ||
+      ordemFinal.some((id) => !ordemAnterior.includes(id))) {
+    mostrarMensagem("As colunas mudaram durante o arrasto. Tente novamente.", "erro");
+    return;
+  }
 
   const mudouOrdem =
-    ordemFinal.length !== ordemAnterior.length ||
     ordemFinal.some((id, idx) => id !== ordemAnterior[idx]);
   if (!mudouOrdem) return;
 
   try {
+    const lote = writeBatch(db);
     for (let i = 0; i < ordemFinal.length; i++) {
-      await updateDoc(doc(db, "colunas", ordemFinal[i]), { ordem: i });
+      lote.update(doc(db, "colunas", ordemFinal[i]), { ordem: i });
     }
+    await lote.commit();
     await registrarHistoricoGlobal("reordenacao", {
       ordem: ordemFinal.map((id) => {
         const c = cacheColunas.find((x) => x.id === id);
@@ -4068,6 +4183,7 @@ async function finalizarArrastoColuna() {
     });
     mostrarMensagem("Colunas reordenadas.", "sucesso");
   } catch (erro) {
+    console.error("Erro ao reordenar as colunas:", erro);
     mostrarMensagem("Erro ao reordenar as colunas.", "erro");
   }
 }

@@ -12,13 +12,14 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/layout-base.css">
+  <link rel="stylesheet" href="css/conexoes.css">
 </head>
 <body class="tema-escuro">
   <script>
     (function(){var t=localStorage.getItem("golden-tema")||"claro",f=localStorage.getItem("golden-fonte")||"normal";document.body.className="tema-"+t+" fonte-"+f;})();
   </script>
-  <div id="conteudo-protegido">
-    <div class="app-layout">
+  <div id="conteudo-protegido" class="oculto">
+    <div class="app-shell">
 
       <aside class="sidebar">
         <div class="sidebar-topo">
@@ -31,7 +32,7 @@
             <span class="nav-icone" data-icone="home"></span>
             <span class="nav-label">Home</span>
           </a>
-          <a href="vendas.html" class="nav-item ativo" data-cargos="vendas">
+          <a href="vendas.html" class="nav-item" data-cargos="vendas">
             <span class="nav-icone" data-icone="vendas"></span>
             <span class="nav-label">Vendas</span>
           </a>
@@ -93,7 +94,7 @@
         <header class="app-header">
           <div class="header-busca">
             <span class="icone-busca" data-icone="busca" data-tamanho="15"></span>
-            <input type="text" id="campo-busca" placeholder="Buscar conexões..." autocomplete="off">
+            <input type="text" id="campo-busca" placeholder="Buscar número, nome ou ID..." aria-label="Buscar conexões por número, nome ou ID" autocomplete="off">
           </div>
 
           <div class="header-acoes">
@@ -134,15 +135,75 @@
             </div>
           </div>
 
-          <div style="background: var(--bg-card); border: 1px solid var(--borda); border-radius: 16px; padding: 48px 32px; text-align: center; max-width: 640px; margin: 40px auto;">
-            <div style="width: 64px; height: 64px; border-radius: 50%; background: var(--bg-item); display: flex; align-items: center; justify-content: center; margin: 0 auto 18px; color: var(--azul-destaque);">
-              <span data-icone="conexoes" data-tamanho="32"></span>
+          <div id="aviso-conexoes" class="conexoes-aviso" role="status"></div>
+          <section class="conexoes-painel">
+            <div class="conexoes-titulo-secao">
+              <div>
+                <h2>WhatsApp Business Platform</h2>
+                <p>Conecte números pela API oficial da Meta. Tokens e segredos são guardados no Google Secret Manager.</p>
+              </div>
+              <span class="conexoes-status" id="status-integracao">Verificando integração...</span>
             </div>
-            <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Módulo de Conexões</h2>
-            <p style="color: #8a99ad; font-size: 14px; line-height: 1.6; max-width: 440px; margin: 0 auto;">
-              Esta tela será configurada em breve com os recursos de conexões e integrações da plataforma.
-            </p>
-          </div>
+            <div id="form-conectar-wrap" class="conexoes-form-wrap" hidden>
+              <h3>Vincular número</h3>
+              <form id="form-conectar" class="conexoes-form">
+                <label>Phone Number ID<input name="phoneNumberId" required inputmode="numeric" placeholder="ID do número no Meta for Developers"></label>
+                <label>WhatsApp Business Account ID<input name="wabaId" required inputmode="numeric" placeholder="ID da conta empresarial"></label>
+                <label>Token de acesso permanente<input name="accessToken" type="password" required autocomplete="new-password"></label>
+                <label>App Secret<input name="appSecret" type="password" required autocomplete="new-password"></label>
+                <label>Token de verificação do webhook<input name="verifyToken" type="password" required minlength="8" autocomplete="new-password"></label>
+                <p class="texto-ajuda">Use um token de verificação escolhido por você e informe o mesmo valor no painel da Meta. Guarde-o antes de vincular: por segurança, ele não será exibido novamente.</p>
+                <div class="conexoes-form-acoes">
+                  <p>O mesmo App Secret e token de verificação podem ser usados ao vincular outros números do mesmo app Meta.</p>
+                  <button type="submit" class="conexoes-botao-primario">Vincular número</button>
+                </div>
+              </form>
+            </div>
+            <div id="lista-numeros" class="conexoes-lista-numeros">
+              <p class="texto-ajuda">Carregando números...</p>
+            </div>
+          </section>
+
+          <section class="conexoes-painel">
+            <div class="conexoes-titulo-secao">
+              <div>
+                <h2>Pré-atendimento automático</h2>
+                <p>Envie uma resposta inicial configurável quando uma nova conversa chegar a um número com captação ativa.</p>
+              </div>
+            </div>
+            <form id="form-bot" class="conexoes-bot-form">
+              <label>Número vinculado
+                <select id="bot-numero" required><option value="">Selecione um número</option></select>
+              </label>
+              <label class="conexoes-checkbox"><input type="checkbox" id="bot-ativo"><span>Ativar resposta automática neste número</span></label>
+              <label>Mensagem inicial<textarea id="bot-mensagem" rows="4" maxlength="1000" placeholder="Olá! Recebemos sua mensagem. Como podemos ajudar?"></textarea></label>
+              <div class="conexoes-form-acoes">
+                <p>O bot responde uma vez por conversa. A Meta só permite mensagens livres durante a janela de atendimento de 24 horas iniciada pelo cliente.</p>
+                <button type="submit" class="conexoes-botao-primario">Salvar mensagem do bot</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="conexoes-painel conexoes-iniciar">
+            <div class="conexoes-titulo-secao">
+              <div>
+                <h2>Iniciar conversa</h2>
+                <p>Novos contatos iniciados pela equipe precisam usar um modelo aprovado pela Meta.</p>
+              </div>
+            </div>
+            <form id="form-nova-conversa" class="conexoes-form">
+              <label>Número de origem<select name="phoneNumberId" class="seletor-numeros" required><option value="">Selecione um número</option></select></label>
+              <label>Telefone do cliente<input name="telefone" required inputmode="tel" placeholder="5511999999999"></label>
+              <label>Nome do cliente<input name="nome" placeholder="Nome (opcional)"></label>
+              <label>Modelo aprovado<input name="templateName" required placeholder="nome_do_modelo"></label>
+              <label>Idioma do modelo<input name="templateLanguage" value="pt_BR" required></label>
+              <label>Parâmetros do corpo do modelo<textarea name="templateVariables" rows="2" placeholder="Um parâmetro por linha, na ordem aprovada"></textarea></label>
+              <div class="conexoes-form-acoes">
+                <p>Este envio cria um card na primeira coluna do kanban após a aceitação da mensagem pela Meta. Apenas modelos aprovados podem iniciar uma conversa.</p>
+                <button type="submit" class="conexoes-botao-primario">Enviar modelo e criar card</button>
+              </div>
+            </form>
+          </section>
         </main>
 
       </div>

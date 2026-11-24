@@ -111,8 +111,8 @@ const conteudoEstoque = document.getElementById("conteudo-estoque");
 // Cabeçalho
 const botaoPerfil = document.getElementById("botao-perfil");
 const menuPerfil = document.getElementById("menu-perfil");
-const itemConfiguracoes = document.getElementById("item-configuracoes");
 const itemSair = document.getElementById("item-sair");
+const controlesEstoque = document.getElementById("controles-estoque");
 
 // Menu lateral e painéis
 const itensMenu = document.querySelectorAll(".aba-modulo");
@@ -243,6 +243,7 @@ onAuthStateChanged(auth, async (usuario) => {
   atualizarCabecalhoUsuario(dadosUsuario);
 
   conteudoEstoque.style.display = "block";
+  controlesEstoque.hidden = false;
   escutarProdutos();
   escutarMovimentacoes();
   escutarCategorias();
@@ -321,11 +322,6 @@ document.addEventListener("click", (evento) => {
   }
 });
 
-itemConfiguracoes.addEventListener("click", () => {
-  menuPerfil.classList.remove("aberta");
-  mostrarMensagem("Configurações estarão disponíveis em breve.", "sucesso");
-});
-
 itemSair.addEventListener("click", async () => {
   menuPerfil.classList.remove("aberta");
 
@@ -342,6 +338,7 @@ itemSair.addEventListener("click", async () => {
 // o filtro de busca (para a ordenação valer também com busca ativa).
 // ------------------------------------------------------------
 seletorOrdenacao.addEventListener("change", () => {
+  ativarPainel("estoque");
   ordenacaoAtual = seletorOrdenacao.value;
   ordenarProdutos();
   renderizarTabela();
@@ -355,6 +352,7 @@ seletorOrdenacao.addEventListener("change", () => {
 // redesenha tudo e remove os filtros das linhas.
 itemResetar.addEventListener("click", () => {
   menuTabela.classList.remove("aberta");
+  ativarPainel("estoque");
 
   campoBusca.value = "";
   seletorOrdenacao.value = "codigo";
@@ -388,6 +386,7 @@ function escutarProdutos() {
     ordenarProdutos();
 
     renderizarTabela();
+    aplicarFiltros();
     preencherSeletor(selectEntradaProduto);
     preencherSeletor(selectSaidaProduto);
   });
@@ -481,6 +480,7 @@ function escutarCategorias() {
     }
 
     renderizarTabela();
+    aplicarFiltros();
     preencherSeletorCategorias();
   });
 }
@@ -722,7 +722,10 @@ function aplicarFiltros() {
     (visiveis === 0 && cacheProdutos.length > 0) ? "block" : "none";
 }
 
-campoBusca.addEventListener("input", aplicarFiltros);
+campoBusca.addEventListener("input", () => {
+  ativarPainel("estoque");
+  aplicarFiltros();
+});
 // ============================================================
 // PARTE 2 — movimentações, histórico, edição de produto,
 // menu dos três pontinhos e GERENCIADOR DE CATEGORIAS.

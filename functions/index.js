@@ -1,0 +1,1138 @@
+"use strict";
+
+const crypto = require("node:crypto");
+const { SecretManagerServiceClient } = require("@google-cloud/secret-manager");
+const { initializeApp } = require("firebase-admin/app");
+const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+
+initializeApp();
+
+const db = getFirestore();
+const REGION = "southamerica-east1";
+const GRAPH_API_VERSION = "v26.0";
+const META_GRAPH = "https://graph.facebook.com/" + GRAPH_API_VERSION;
+const ADMIN_EMAILS = ["eamgfn4ever@gmail.com"];
+const ALLOWED_SALES_ROLES = ["vendas", "administracao"];
+const DAY_MS = 24 * 60 * 60 * 1000;
+const secretManager = new SecretManagerServiceClient();
+
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function normalizePhone(phone) {
+  return String(phone || "").replace(/\D/g, "");
+}
+
+function isAdmin(request) {
+  return ADMIN_EMAILS.includes(normalizeEmail(request.auth && request.auth.token.email));
+}
+
+async function assertAuthorized(request) {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Faça login para continuar.");
+  }
+  if (isAdmin(request)) return;
+
+  const email = normalizeEmail(request.auth.token.email);
+  if (!email) throw new HttpsError("permission-denied", "Sua conta não tem e-mail verificado.");
+  const snapshot = await db.collection("solicitacoes").get();
+  const permitido = snapshot.docs.some((documento) => {
+    const dados = documento.data();
+    return normalizeEmail(dados.email) === email &&
+      dados.status === "aprovada" &&
+      ALLOWED_SALES_ROLES.includes(dados.cargo);
+  });
+  if (!permitido) throw new HttpsError("permission-denied", "Acesso restrito aos setores de Vendas e Administração.");
+}
+
+async function assertAdmin(request) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Faça login para continuar.");
+  if (isAdmin(request)) return;
+  const email = normalizeEmail(request.auth.token.email);
+  const snapshot = await db.collection("solicitacoes").get();
+  const ehAdmin = snapshot.docs.some((documento) => {
+    const dados = documento.data();
+    return normalizeEmail(dados.email) === email &&
+      dados.status === "aprovada" &&
+      dados.cargo === "administracao";
+  });
+  if (!ehAdmin) {
+    throw new HttpsError("permission-denied", "Somente o administrador pode alterar números vinculados e a captação.");
+  }
+}
+
+function secretPath(secretId) {
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
+  if (!projectId) throw new Error("Não foi possível determinar o projeto do Google Cloud.");
+  return "projects/" + projectId + "/secrets/" + secretId;
+}
+
+async function saveSecret(secretId, value) {
+  const path = secretPath(secretId);
+  try {
+    await secretManager.getSecret({ name: path });
+  } catch (erro) {
+    if (erro.code !== 5) throw erro;
+    try {
+      await secretManager.createSecret({
+        parent: path.split("/secrets/")[0],
+        secretId,
+        secret: { replication: { automatic: {} } }
+      });
+    } catch (criacaoErro) {
+      if (criacaoErro.code !== 6) throw criacaoErro;
+    }
+  }
+  await secretManager.addSecretVersion({
+    parent: path,
+    payload: { data: Buffer.from(value, "utf8") }
+  });
+}
+
+async function readSecret(secretId) {
+  const [version] = await secretManager.accessSecretVersion({
+    name: secretPath(secretId) + "/versions/latest"
+  });
+  if (!version.payload || !version.payload.data) throw new Error("O segredo " + secretId + " está vazio.");
+  return Buffer.from(version.payload.data).toString("utf8");
+}
+
+function tokenSecretId(phoneNumberId) {
+  return "golden-whatsapp-token-" + phoneNumberId;
+}
+
+function publicNumber(documento) {
+  const dados = documento.data();
+  return {
+    phoneNumberId: documento.id,
+    wabaId: dados.wabaId,
+    displayPhoneNumber: dados.displayPhoneNumber || "",
+    verifiedName: dados.verifiedName || "",
+    active: dados.active === true,
+    captureEnabled: dados.captureEnabled === true,
+    preAtendimentoEnabled: dados.preAtendimentoEnabled === true,
+    preAtendimentoMessage: dados.preAtendimentoMessage || ""
+  };
+}
+
+async function loadActiveNumber(phoneNumberId) {
+  const snapshot = await db.collection("whatsappNumbers").doc(String(phoneNumberId || "")).get();
+  if (!snapshot.exists || snapshot.data().active !== true) {
+    throw new HttpsError("failed-precondition", "Este número não está vinculado ou foi desativado.");
+  }
+  return { id: snapshot.id, ...snapshot.data() };
+}
+
+async function graphRequest(url, accessToken, options) {
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers: {
+        Authorization: "Bearer " + accessToken,
+        ...(options && options.headers ? options.headers : {})
+      },
+      signal: AbortSignal.timeout(20000)
+    });
+  } catch (erro) {
+    throw new Error("Não foi possível conectar à API da Meta: " + erro.message);
+  }
+  let body = {};
+  try {
+    body = await response.json();
+  } catch (_) {
+    body = {};
+  }
+  if (!response.ok) {
+    const detalhe = body.error && body.error.message;
+    const codigo = body.error && body.error.code;
+    throw new Error("Meta Graph API (" + (codigo || response.status) + "): " + (detalhe || "a solicitação foi recusada."));
+  }
+  return body;
+}
+
+function montarPayloadMensagem(dados) {
+  if (dados.mode === "template") {
+    const templateName = String(dados.templateName || "").trim();
+    const templateLanguage = String(dados.templateLanguage || "pt_BR").trim();
+    if (!/^[a-zA-Z0-9_]{1,512}$/.test(templateName)) {
+      throw new HttpsError("invalid-argument", "Informe o nome de um modelo aprovado pela Meta.");
+    }
+    if (!/^[a-zA-Z0-9_-]{2,20}$/.test(templateLanguage)) {
+      throw new HttpsError("invalid-argument", "O idioma do modelo é inválido.");
+    }
+    const rawVariables = Array.isArray(dados.templateVariables)
+      ? dados.templateVariables
+      : String(dados.templateVariables || "").split(/\r?\n/);
+    const variables = rawVariables.map((value) => String(value).trim()).filter(Boolean);
+    if (variables.length > 20 || variables.some((value) => value.length > 1024)) {
+      throw new HttpsError("invalid-argument", "O modelo aceita até 20 parâmetros de texto, com no máximo 1024 caracteres cada.");
+    }
+    const template = { name: templateName, language: { code: templateLanguage } };
+    if (variables.length) {
+      template.components = [{
+        type: "body",
+        parameters: variables.map((text) => ({ type: "text", text }))
+      }];
+    }
+    return {
+      type: "template",
+      template
+    };
+  }
+  const text = String(dados.text || dados.message || "").trim();
+  if (!text || text.length > 4096) {
+    throw new HttpsError("invalid-argument", "A mensagem precisa ter entre 1 e 4096 caracteres.");
+  }
+  return { type: "text", text: { body: text, preview_url: false } };
+}
+
+async function sendGraphMessage(number, recipient, message) {
+  const accessToken = await readSecret(tokenSecretId(number.id));
+  const response = await graphRequest(
+    META_GRAPH + "/" + number.id + "/messages",
+    accessToken,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: recipient,
+        ...message
+      })
+    }
+  );
+  const messageId = response.messages && response.messages[0] && response.messages[0].id;
+  if (!messageId) throw new Error("A Meta não retornou o identificador da mensagem enviada.");
+  return messageId;
+}
+
+async function getFirstColumn() {
+  const snapshot = await db.collection("colunas").get();
+  if (snapshot.empty) {
+    throw new HttpsError("failed-precondition", "Crie uma coluna no kanban antes de iniciar uma conversa.");
+  }
+  const first = snapshot.docs.sort((a, b) => (a.data().ordem || 0) - (b.data().ordem || 0))[0];
+  return { id: first.id, ...first.data() };
+}
+
+async function assertTextWindow(card, mode) {
+  if (mode === "template") return;
+  const lastInboundAt = card && card.lastInboundAt;
+  const lastInboundMs = lastInboundAt && typeof lastInboundAt.toMillis === "function"
+    ? lastInboundAt.toMillis()
+    : 0;
+  if (!lastInboundMs || Date.now() - lastInboundMs > DAY_MS) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Fora da janela de atendimento de 24 horas da Meta, somente modelos aprovados podem iniciar ou retomar a conversa."
+    );
+  }
+}
+
+async function recordMessage(cardId, message, messageId) {
+  const ref = db.collection("cards").doc(cardId).collection("mensagensWhatsapp");
+  const target = messageId ? ref.doc(messageId) : ref.doc();
+  await target.set({
+    ...message,
+    criadoEm: FieldValue.serverTimestamp()
+  }, { merge: true });
+}
+
+async function scheduleCardJob(cardId, programacao) {
+  if (!programacao || programacao.status !== "aguardando_envio" || !programacao.dataHora) return;
+  const scheduledAt = timestampFrom(programacao.dataHora);
+  if (!scheduledAt) return;
+  const phoneNumberId = String(programacao.phoneNumberId || "");
+  if (!phoneNumberId) {
+    await db.collection("cards").doc(cardId).update({
+      "programacao.status": "falha",
+      "programacao.erro": "Selecione um número do WhatsApp antes de agendar."
+    });
+    return;
+  }
+  const jobKey = crypto.createHash("sha1")
+    .update(JSON.stringify([cardId, scheduledAt.toMillis(), programacao.tipoMensagem || "text", programacao.texto || "", programacao.templateName || "", phoneNumberId]))
+    .digest("hex").slice(0, 24);
+  await createJobIfMissing("card-" + jobKey, {
+    kind: "card",
+    cardId,
+    phoneNumberId,
+    scheduledAt,
+    mode: programacao.tipoMensagem === "template" ? "template" : "text",
+    text: programacao.texto || "",
+    templateName: programacao.templateName || "",
+    templateLanguage: programacao.templateLanguage || "pt_BR",
+    templateVariables: programacao.templateVariables || [],
+    status: "scheduled"
+  });
+}
+
+function timestampFrom(value) {
+  if (!value) return null;
+  if (value instanceof Timestamp) return value;
+  if (typeof value.toDate === "function") return Timestamp.fromDate(value.toDate());
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return Timestamp.fromDate(value);
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : Timestamp.fromDate(date);
+}
+
+async function createJobIfMissing(id, job) {
+  const ref = db.collection("whatsappJobs").doc(id);
+  await db.runTransaction(async (transaction) => {
+    const existing = await transaction.get(ref);
+    if (existing.exists) {
+      if (existing.data().status === "cancelled" && job.scheduledAt.toMillis() > Date.now()) {
+        transaction.update(ref, {
+          ...job,
+          attempts: 0,
+          erro: FieldValue.delete(),
+          canceladoEm: FieldValue.delete(),
+          atualizadoEm: FieldValue.serverTimestamp()
+        });
+      }
+      return;
+    }
+    transaction.create(ref, {
+      ...job,
+      attempts: 0,
+      criadoEm: FieldValue.serverTimestamp()
+    });
+  });
+}
+
+async function cancelScheduledJobsForCard(cardId, kind, columnId, scheduledAtMillis) {
+  const snapshot = await db.collection("whatsappJobs").where("cardId", "==", cardId).get();
+  const batch = db.batch();
+  let count = 0;
+  snapshot.docs.forEach((job) => {
+    const dados = job.data();
+    if (dados.status !== "scheduled" || (kind && dados.kind !== kind) ||
+      (columnId && dados.columnId !== columnId) ||
+      (scheduledAtMillis && (!dados.scheduledAt || dados.scheduledAt.toMillis() !== scheduledAtMillis))) return;
+    batch.update(job.ref, { status: "cancelled", canceladoEm: FieldValue.serverTimestamp() });
+    count += 1;
+  });
+  if (count) await batch.commit();
+}
+
+async function scheduleColumnJobs(columnId, column, cardDocuments) {
+  const config = column.configFuncionaria || {};
+  const scheduledAt = timestampFrom(config.dataHoraColuna);
+  if (!scheduledAt || scheduledAt.toMillis() <= Date.now() ||
+      !config.mensagemWhatsapp && !config.templateName ||
+      !config.phoneNumberId) return;
+  const mode = config.tipoMensagem === "template" ? "template" : "text";
+  for (const cardDocument of cardDocuments) {
+    const card = cardDocument.data();
+    if (card.excluido || card.colunaId !== columnId || !card.telefone) continue;
+    const jobKey = crypto.createHash("sha1")
+      .update(JSON.stringify([columnId, cardDocument.id, scheduledAt.toMillis(), mode, config.mensagemWhatsapp || "", config.templateName || "", config.phoneNumberId]))
+      .digest("hex").slice(0, 24);
+    await createJobIfMissing("column-" + jobKey, {
+      kind: "column",
+      cardId: cardDocument.id,
+      columnId,
+      phoneNumberId: String(config.phoneNumberId),
+      scheduledAt,
+      mode,
+      text: config.mensagemWhatsapp || "",
+      templateName: config.templateName || "",
+      templateLanguage: config.templateLanguage || "pt_BR",
+      templateVariables: config.templateVariables || [],
+      status: "scheduled"
+    });
+  }
+}
+
+async function syncColumnJobs(columnId) {
+  const columnSnapshot = await db.collection("colunas").doc(columnId).get();
+  if (!columnSnapshot.exists) return;
+  const cards = await db.collection("cards").where("colunaId", "==", columnId).get();
+  const active = cards.docs.filter((card) => !card.data().excluido);
+  await scheduleColumnJobs(columnId, columnSnapshot.data(), active);
+}
+
+async function moveCardAfterDelivery(cardId) {
+  const cardRef = db.collection("cards").doc(cardId);
+  const result = await db.runTransaction(async (transaction) => {
+    const cardSnapshot = await transaction.get(cardRef);
+    if (!cardSnapshot.exists) return null;
+    const card = cardSnapshot.data();
+    const columnRef = db.collection("colunas").doc(card.colunaId);
+    const columnSnapshot = await transaction.get(columnRef);
+    if (!columnSnapshot.exists || columnSnapshot.data().tipo !== "funcionaria") return null;
+    const column = columnSnapshot.data();
+    const config = column.configFuncionaria || {};
+    if (!config.colunaDestinoId) return null;
+    const needsColumn = config.moverAposMensagemColuna !== false;
+    const needsCard = config.moverAposMensagemCard === true;
+    const columnSent = !!card.entregaColunaEm;
+    const cardSent = !!(card.programacao && card.programacao.status === "enviado");
+    if ((needsColumn && !columnSent) || (needsCard && !cardSent)) return null;
+
+    const destinationRef = db.collection("colunas").doc(config.colunaDestinoId);
+    const destinationSnapshot = await transaction.get(destinationRef);
+    if (!destinationSnapshot.exists) return null;
+    transaction.update(cardRef, {
+      colunaId: destinationRef.id,
+      entregaColunaEm: null,
+      ultimaAtividade: FieldValue.serverTimestamp()
+    });
+    return {
+      card,
+      fromId: columnRef.id,
+      fromName: column.nome || "—",
+      toId: destinationRef.id,
+      toName: destinationSnapshot.data().nome || "—"
+    };
+  });
+  if (!result) return;
+  const event = {
+    tipo: "movimentacao",
+    cardId,
+    cardResumo: result.card.nomeConta || "—",
+    colunaOrigemId: result.fromId,
+    colunaDestinoId: result.toId,
+    automatico: true,
+    autor: null,
+    detalhes: { de: result.fromName, para: result.toName },
+    timestamp: FieldValue.serverTimestamp()
+  };
+  await Promise.all([
+    db.collection("cards").doc(cardId).collection("historico").add({
+      tipo: "movimentacao",
+      automatico: true,
+      diretrizDe: null,
+      autor: null,
+      detalhes: { de: result.fromName, para: result.toName },
+      timestamp: FieldValue.serverTimestamp()
+    }),
+    db.collection("colunas").doc(result.fromId).collection("historico").add({ ...event, tipo: "saida" }),
+    db.collection("colunas").doc(result.toId).collection("historico").add({ ...event, tipo: "entrada" })
+  ]);
+}
+
+async function processScheduledJob(jobSnapshot) {
+  const jobRef = jobSnapshot.ref;
+  const claimed = await db.runTransaction(async (transaction) => {
+    const latest = await transaction.get(jobRef);
+    if (!latest.exists) return null;
+    const current = latest.data();
+    if (current.status === "accepted" ||
+        (current.status === "finalizing" && current.lockedAt &&
+          Date.now() - current.lockedAt.toMillis() > 10 * 60 * 1000)) {
+      transaction.update(jobRef, {
+        status: "finalizing",
+        lockedAt: FieldValue.serverTimestamp()
+      });
+      return { ...current, accepted: true };
+    }
+    const staleSending = current.status === "sending" && current.lockedAt &&
+      Date.now() - current.lockedAt.toMillis() > 10 * 60 * 1000;
+    if (current.status !== "scheduled" && !staleSending) return null;
+    const attempts = Number(current.attempts || 0) + 1;
+    transaction.update(jobRef, {
+      status: "sending",
+      attempts,
+      iniciadoEm: FieldValue.serverTimestamp(),
+      lockedAt: FieldValue.serverTimestamp(),
+      erro: FieldValue.delete()
+    });
+    return { ...current, attempts, accepted: false };
+  });
+  if (!claimed) return;
+
+  let apiMessageId = claimed.accepted ? claimed.apiMessageId : null;
+  try {
+    const cardRef = db.collection("cards").doc(claimed.cardId);
+    const cardSnapshot = await cardRef.get();
+    if (!cardSnapshot.exists || (cardSnapshot.data().excluido && !claimed.accepted)) {
+      throw new Error("O card não existe mais ou foi excluído.");
+    }
+    const card = cardSnapshot.data();
+    if (!claimed.accepted && claimed.kind === "column" && card.colunaId !== claimed.columnId) {
+      await jobRef.update({ status: "cancelled", erro: "O card saiu da coluna antes do envio." });
+      return;
+    }
+    const number = claimed.accepted
+      ? { id: claimed.phoneNumberId }
+      : await loadActiveNumber(claimed.phoneNumberId);
+    const payload = montarPayloadMensagem(claimed);
+    if (!claimed.accepted) {
+      await assertTextWindow(card, claimed.mode);
+      apiMessageId = await sendGraphMessage(number, normalizePhone(card.telefone), payload);
+    }
+    if (!claimed.accepted) {
+      await jobRef.update({
+        status: "accepted",
+        apiMessageId,
+        aceitoPelaMetaEm: FieldValue.serverTimestamp(),
+        lockedAt: FieldValue.serverTimestamp()
+      });
+    }
+    await recordMessage(claimed.cardId, {
+      direction: "outgoing",
+      type: payload.type,
+      text: payload.type === "text" ? payload.text.body : "Modelo: " + payload.template.name,
+      apiMessageId,
+      status: "sent",
+      phoneNumberId: number.id,
+      automatico: true,
+      origem: claimed.kind
+    }, apiMessageId);
+    const cardUpdate = {
+      ultimaAtividade: FieldValue.serverTimestamp(),
+      whatsappPhoneNumberId: number.id
+    };
+    if (claimed.kind === "card") {
+      const programacaoSemErro = { ...(card.programacao || {}) };
+      delete programacaoSemErro.erro;
+      cardUpdate.programacao = {
+        ...programacaoSemErro,
+        status: "enviado",
+        enviadoEm: FieldValue.serverTimestamp(),
+        apiMessageId
+      };
+    } else {
+      cardUpdate.entregaColunaEm = FieldValue.serverTimestamp();
+      cardUpdate.entregaColunaErro = FieldValue.delete();
+    }
+    await cardRef.update(cardUpdate);
+    await jobRef.update({
+      status: "sent",
+      apiMessageId,
+      enviadoEm: FieldValue.serverTimestamp()
+    });
+    await moveCardAfterDelivery(claimed.cardId);
+  } catch (erro) {
+    if (claimed.accepted || apiMessageId) {
+      await jobRef.update({
+        status: "accepted",
+        apiMessageId,
+        erro: erro.message || "Falha ao atualizar o kanban após a aceitação da Meta.",
+        atualizadoEm: FieldValue.serverTimestamp()
+      }).catch((erroAtualizacao) => {
+        console.error("Não foi possível registrar que a mensagem aceita está pendente de sincronização:", erroAtualizacao.message);
+      });
+      return;
+    }
+    const canRetry = claimed.attempts < 4 &&
+      /429|5\d\d|\((4|17|32|613|80007)\)|conectar à API|timed out|timeout|aborted|network|fetch failed/i.test(erro.message || "");
+    const update = {
+      status: canRetry ? "scheduled" : "failed",
+      erro: erro.message || "Falha ao enviar mensagem.",
+      atualizadoEm: FieldValue.serverTimestamp()
+    };
+    if (canRetry) update.scheduledAt = Timestamp.fromMillis(Date.now() + Math.min(claimed.attempts * 60000, 10 * 60000));
+    await jobRef.update(update);
+    const cardRef = db.collection("cards").doc(claimed.cardId);
+    if (claimed.kind === "card") {
+      await cardRef.update({
+        "programacao.status": canRetry ? "aguardando_envio" : "falha",
+        "programacao.erro": update.erro,
+        ultimaAtividade: FieldValue.serverTimestamp()
+      }).catch((erroAtualizacao) => {
+        console.error("Não foi possível atualizar o card após a falha do envio:", erroAtualizacao.message);
+      });
+    } else {
+      await cardRef.update({ entregaColunaErro: update.erro }).catch((erroAtualizacao) => {
+        console.error("Não foi possível exibir a falha do envio da coluna:", erroAtualizacao.message);
+      });
+    }
+  }
+}
+
+async function firstColumnId() {
+  const snapshot = await db.collection("colunas").get();
+  if (snapshot.empty) return null;
+  return snapshot.docs.sort((a, b) => (a.data().ordem || 0) - (b.data().ordem || 0))[0].id;
+}
+
+exports.getWhatsAppConnections = onCall({ region: REGION }, async (request) => {
+  await assertAuthorized(request);
+  const snapshot = await db.collection("whatsappNumbers").get();
+  return { numbers: snapshot.docs.map(publicNumber).sort((a, b) => a.displayPhoneNumber.localeCompare(b.displayPhoneNumber)) };
+});
+
+exports.connectWhatsAppNumber = onCall({ region: REGION, timeoutSeconds: 120 }, async (request) => {
+  await assertAdmin(request);
+  const phoneNumberId = String(request.data.phoneNumberId || "").trim();
+  const wabaId = String(request.data.wabaId || "").trim();
+  const accessToken = String(request.data.accessToken || "").trim();
+  const appSecret = String(request.data.appSecret || "").trim();
+  const verifyToken = String(request.data.verifyToken || "").trim();
+  if (!/^\d{6,25}$/.test(phoneNumberId) || !/^\d{6,25}$/.test(wabaId)) {
+    throw new HttpsError("invalid-argument", "Informe o Phone Number ID e o WABA ID válidos.");
+  }
+  if (accessToken.length < 20 || appSecret.length < 10 || verifyToken.length < 8) {
+    throw new HttpsError("invalid-argument", "Confira o token de acesso, o App Secret e o token de verificação.");
+  }
+
+  let metaNumber;
+  try {
+    metaNumber = await graphRequest(
+      META_GRAPH + "/" + phoneNumberId + "?fields=display_phone_number,verified_name",
+      accessToken
+    );
+    await graphRequest(
+      META_GRAPH + "/" + wabaId + "/subscribed_apps",
+      accessToken,
+      { method: "POST" }
+    );
+  } catch (erro) {
+    throw new HttpsError("failed-precondition", "A Meta recusou o vínculo: " + erro.message);
+  }
+
+  try {
+    await Promise.all([
+      saveSecret(tokenSecretId(phoneNumberId), accessToken),
+      saveSecret("golden-whatsapp-app-secret", appSecret),
+      saveSecret("golden-whatsapp-verify-token", verifyToken)
+    ]);
+  } catch (erro) {
+    console.error("Falha ao guardar credenciais no Secret Manager:", erro.message);
+    throw new HttpsError(
+      "failed-precondition",
+      "O número foi validado pela Meta, mas não foi possível proteger as credenciais no Secret Manager. Verifique a permissão Secret Manager Secret Version Adder da conta de execução das Functions."
+    );
+  }
+
+  const numberData = {
+    wabaId,
+    displayPhoneNumber: metaNumber.display_phone_number || "",
+    verifiedName: metaNumber.verified_name || "",
+    active: true,
+    captureEnabled: true,
+    preAtendimentoEnabled: false,
+    criadoPor: request.auth.uid,
+    atualizadoEm: FieldValue.serverTimestamp()
+  };
+  await db.collection("whatsappNumbers").doc(phoneNumberId).set(numberData, { merge: true });
+  return {
+    number: publicNumber({
+      id: phoneNumberId,
+      data: () => ({ ...numberData, active: true })
+    })
+  };
+});
+
+exports.updateWhatsAppNumber = onCall({ region: REGION }, async (request) => {
+  await assertAdmin(request);
+  const phoneNumberId = String(request.data.phoneNumberId || "");
+  const ref = db.collection("whatsappNumbers").doc(phoneNumberId);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) throw new HttpsError("not-found", "Número não encontrado.");
+  if (request.data.action === "capture") {
+    await ref.update({
+      captureEnabled: request.data.captureEnabled === true,
+      atualizadoEm: FieldValue.serverTimestamp()
+    });
+    return { success: true };
+  }
+  if (request.data.action !== "remove") {
+    throw new HttpsError("invalid-argument", "Ação de administração inválida.");
+  }
+
+  const jobs = await db.collection("whatsappJobs").where("phoneNumberId", "==", phoneNumberId).get();
+  const batch = db.batch();
+  jobs.docs.forEach((job) => {
+    if (job.data().status === "scheduled") batch.update(job.ref, { status: "cancelled", erro: "O número foi removido." });
+  });
+  batch.update(ref, {
+    active: false,
+    captureEnabled: false,
+    atualizadoEm: FieldValue.serverTimestamp()
+  });
+  await batch.commit();
+  try {
+    await secretManager.deleteSecret({ name: secretPath(tokenSecretId(phoneNumberId)) });
+  } catch (erro) {
+    if (erro.code !== 5) {
+      console.error("Falha ao remover credencial do Secret Manager:", erro.message);
+      throw new HttpsError("internal", "Não foi possível remover com segurança o token do número.");
+    }
+  }
+  await ref.delete();
+  return { success: true };
+});
+
+exports.saveWhatsAppSettings = onCall({ region: REGION }, async (request) => {
+  await assertAuthorized(request);
+  const number = await loadActiveNumber(request.data.phoneNumberId);
+  const enabled = request.data.preAtendimentoEnabled === true;
+  const message = String(request.data.preAtendimentoMessage || "").trim();
+  if (enabled && !number.captureEnabled) {
+    throw new HttpsError("failed-precondition", "Ative a captação deste número antes de ativar o pré-atendimento.");
+  }
+  if (enabled && (!message || message.length > 1000)) {
+    throw new HttpsError("invalid-argument", "A mensagem do pré-atendimento precisa ter entre 1 e 1000 caracteres.");
+  }
+  await db.collection("whatsappNumbers").doc(number.id).update({
+    preAtendimentoEnabled: enabled,
+    preAtendimentoMessage: message,
+    atualizadoEm: FieldValue.serverTimestamp()
+  });
+  return { success: true };
+});
+
+exports.sendWhatsAppMessage = onCall({ region: REGION, timeoutSeconds: 120 }, async (request) => {
+  await assertAuthorized(request);
+  const data = request.data || {};
+  const phoneNumberId = String(data.phoneNumberId || "");
+  const number = await loadActiveNumber(phoneNumberId);
+  const payload = montarPayloadMensagem(data);
+  const cardId = String(data.cardId || "");
+  const phone = normalizePhone(data.telefone || data.phone || "");
+  let card = null;
+  let cardRef = null;
+  if (cardId) {
+    cardRef = db.collection("cards").doc(cardId);
+    const cardSnapshot = await cardRef.get();
+    if (!cardSnapshot.exists || cardSnapshot.data().excluido) {
+      throw new HttpsError("not-found", "Conversa ou card não encontrado.");
+    }
+    card = cardSnapshot.data();
+    if (!phone) {
+      const cardPhone = normalizePhone(card.telefone);
+      if (!/^\d{8,15}$/.test(cardPhone)) throw new HttpsError("failed-precondition", "O card não tem um telefone válido.");
+    }
+  }
+  const recipient = phone || normalizePhone(card.telefone);
+  if (!/^\d{8,15}$/.test(recipient)) {
+    throw new HttpsError("invalid-argument", "Informe um telefone com código do país e DDD.");
+  }
+  await assertTextWindow(card, payload.type === "template" ? "template" : "text");
+
+  let firstColumn = null;
+  if (!card) firstColumn = await getFirstColumn();
+  let apiMessageId;
+  try {
+    apiMessageId = await sendGraphMessage(number, recipient, payload);
+  } catch (erro) {
+    throw new HttpsError("failed-precondition", erro.message);
+  }
+
+  if (!card) {
+    const now = FieldValue.serverTimestamp();
+    const dataCard = {
+      colunaId: firstColumn.id,
+      nomeConta: String(data.nome || "").trim() || recipient,
+      telefone: recipient,
+      descricao: "Conversa iniciada pela equipe via WhatsApp Business.",
+      iniciadoEm: now,
+      criadoEm: now,
+      ultimaAtividade: now,
+      status: "ativa",
+      excluido: false,
+      whatsappPhoneNumberId: number.id,
+      criadoPor: { uid: request.auth.uid, email: request.auth.token.email || "" }
+    };
+    cardRef = await db.collection("cards").add(dataCard);
+    card = { ...dataCard, nomeConta: dataCard.nomeConta };
+    await db.collection("colunas").doc(firstColumn.id).collection("historico").add({
+      tipo: "entrada",
+      cardId: cardRef.id,
+      cardResumo: card.nomeConta,
+      automatico: true,
+      timestamp: FieldValue.serverTimestamp()
+    });
+  }
+  await recordMessage(cardRef.id, {
+    direction: "outgoing",
+    type: payload.type,
+    text: payload.type === "text" ? payload.text.body : "Modelo: " + payload.template.name,
+    apiMessageId,
+    status: "sent",
+    phoneNumberId: number.id,
+    automatico: false
+  }, apiMessageId);
+  await cardRef.update({
+    whatsappPhoneNumberId: number.id,
+    ultimaAtividade: FieldValue.serverTimestamp()
+  });
+  return { success: true, cardId: cardRef.id, apiMessageId };
+});
+
+exports.scheduleWhatsAppMessage = onCall({ region: REGION }, async (request) => {
+  await assertAuthorized(request);
+  const data = request.data || {};
+  const cardId = String(data.cardId || "");
+  const number = await loadActiveNumber(data.phoneNumberId);
+  const payload = montarPayloadMensagem(data);
+  const scheduledAt = timestampFrom(data.scheduledAt);
+  if (!scheduledAt || scheduledAt.toMillis() < Date.now() + 60000 ||
+      scheduledAt.toMillis() > Date.now() + 365 * DAY_MS) {
+    throw new HttpsError("invalid-argument", "Agende o envio para pelo menos um minuto no futuro e para no máximo um ano.");
+  }
+  const cardRef = db.collection("cards").doc(cardId);
+  const cardSnapshot = await cardRef.get();
+  if (!cardSnapshot.exists || cardSnapshot.data().excluido) throw new HttpsError("not-found", "Conversa ou card não encontrado.");
+  const card = cardSnapshot.data();
+  if (!/^\d{8,15}$/.test(normalizePhone(card.telefone))) throw new HttpsError("failed-precondition", "O card não tem um telefone válido.");
+
+  const programacao = {
+    texto: payload.type === "text" ? payload.text.body : "",
+    tipoMensagem: payload.type,
+    templateName: payload.type === "template" ? payload.template.name : "",
+    templateLanguage: payload.type === "template" ? payload.template.language.code : "pt_BR",
+    templateVariables: payload.type === "template" ? (payload.template.components || []).flatMap((component) =>
+      (component.parameters || []).map((parameter) => parameter.text)
+    ) : [],
+    phoneNumberId: number.id,
+    dataHora: scheduledAt,
+    status: "aguardando_envio",
+    programadoPor: {
+      uid: request.auth.uid,
+      email: request.auth.token.email || ""
+    }
+  };
+  await cancelScheduledJobsForCard(cardId, "card");
+  await cardRef.update({
+    programacao,
+    whatsappPhoneNumberId: number.id,
+    ultimaAtividade: FieldValue.serverTimestamp()
+  });
+  await cardRef.collection("historico").add({
+    tipo: "programacao",
+    automatico: false,
+    autor: { uid: request.auth.uid, email: request.auth.token.email || "" },
+    detalhes: { dataHora: scheduledAt.toDate().toLocaleString("pt-BR") },
+    timestamp: FieldValue.serverTimestamp()
+  });
+  await scheduleCardJob(cardId, programacao);
+  return { success: true };
+});
+
+exports.getWhatsAppMessages = onCall({ region: REGION }, async (request) => {
+  await assertAuthorized(request);
+  const cardId = String(request.data.cardId || "");
+  const cardSnapshot = await db.collection("cards").doc(cardId).get();
+  if (!cardSnapshot.exists) throw new HttpsError("not-found", "Conversa não encontrada.");
+  const snapshot = await db.collection("cards").doc(cardId)
+    .collection("mensagensWhatsapp").orderBy("criadoEm", "desc").limit(100).get();
+  return {
+    messages: snapshot.docs.map((documento) => {
+      const dados = documento.data();
+      return {
+        id: documento.id,
+        direction: dados.direction || "incoming",
+        type: dados.type || "text",
+        text: dados.text || "",
+        status: dados.status || "",
+        timestamp: dados.criadoEm && dados.criadoEm.toMillis ? dados.criadoEm.toMillis() : null
+      };
+    }).reverse()
+  };
+});
+
+async function handleInboundMessage(numberId, message, contact, numberData) {
+  const sender = normalizePhone(message.from);
+  if (!/^\d{8,15}$/.test(sender)) return;
+  const receivedDate = message.timestamp ? new Date(Number(message.timestamp) * 1000) : new Date();
+  const receivedAt = Timestamp.fromDate(Number.isNaN(receivedDate.getTime()) ? new Date() : receivedDate);
+  const messageText = message.text && message.text.body
+    ? message.text.body
+    : message.type === "image" ? "[Imagem recebida]"
+      : message.type === "audio" ? "[Áudio recebido]"
+        : message.type === "video" ? "[Vídeo recebido]"
+          : message.type === "document" ? "[Documento recebido]"
+            : "[Mensagem " + String(message.type || "recebida") + "]";
+  const eventRef = db.collection("whatsappWebhookEvents").doc(message.id);
+  const alreadyProcessed = await db.runTransaction(async (transaction) => {
+    const eventSnapshot = await transaction.get(eventRef);
+    if (eventSnapshot.exists && eventSnapshot.data().processed === true) return true;
+    transaction.set(eventRef, {
+      processed: false,
+      atualizadoEm: FieldValue.serverTimestamp()
+    }, { merge: true });
+    return false;
+  });
+  if (alreadyProcessed) return;
+
+  let cardDocument = null;
+  const candidates = await db.collection("cards")
+    .where("whatsappPhoneNumberId", "==", numberId).get();
+  cardDocument = candidates.docs.find((documento) =>
+    normalizePhone(documento.data().telefone) === sender &&
+    !documento.data().excluido &&
+    documento.data().status !== "perdida" &&
+    documento.data().status !== "finalizada"
+  ) || null;
+
+  if (!cardDocument) {
+    const columnId = await firstColumnId();
+    if (!columnId) throw new Error("Crie uma coluna no kanban antes de receber conversas pelo WhatsApp.");
+    const profileName = contact && contact.profile && contact.profile.name;
+    const cardRef = db.collection("cards").doc();
+    const card = {
+      colunaId: columnId,
+      nomeConta: profileName || sender,
+      telefone: sender,
+      razaoSocial: "",
+      email: "",
+      descricao: "",
+      valorNegociado: 0,
+      iniciadoEm: receivedAt,
+      criadoEm: FieldValue.serverTimestamp(),
+      ultimaAtividade: receivedAt,
+      lastInboundAt: receivedAt,
+      status: "ativa",
+      excluido: false,
+      origem: "whatsapp",
+      whatsappPhoneNumberId: numberId,
+      criadoPor: { sistema: "whatsapp-webhook" }
+    };
+    await cardRef.set(card);
+    cardDocument = { id: cardRef.id, ref: cardRef, data: () => card };
+    await db.collection("colunas").doc(columnId).collection("historico").add({
+      tipo: "entrada",
+      cardId: cardRef.id,
+      cardResumo: card.nomeConta,
+      automatico: true,
+      timestamp: FieldValue.serverTimestamp()
+    });
+  } else {
+    await cardDocument.ref.update({
+      lastInboundAt: receivedAt,
+      ultimaAtividade: receivedAt,
+      whatsappPhoneNumberId: numberId
+    });
+  }
+
+  await cardDocument.ref.collection("mensagensWhatsapp").doc(message.id).set({
+    direction: "incoming",
+    type: message.type || "text",
+    text: messageText,
+    apiMessageId: message.id,
+    phoneNumberId: numberId,
+    status: "received",
+    criadoEm: receivedAt
+  });
+  await cardDocument.ref.update({
+    ultimaMensagemWhatsapp: messageText.slice(0, 300),
+    ultimaAtividade: receivedAt
+  });
+
+  if (numberData.preAtendimentoEnabled && numberData.preAtendimentoMessage) {
+    const claimed = await db.runTransaction(async (transaction) => {
+      const latest = await transaction.get(cardDocument.ref);
+      if (!latest.exists) return false;
+      const lastBotReply = latest.data().botRespostaEnviadaEm;
+      if (lastBotReply && Date.now() - lastBotReply.toMillis() < DAY_MS) return false;
+      transaction.update(cardDocument.ref, { botRespostaEnviadaEm: FieldValue.serverTimestamp() });
+      return true;
+    });
+    if (claimed) {
+      try {
+        const apiMessageId = await sendGraphMessage(
+          { id: numberId },
+          sender,
+          { type: "text", text: { body: numberData.preAtendimentoMessage, preview_url: false } }
+        );
+        await cardDocument.ref.update({
+          botRespostaApiId: apiMessageId,
+          botRespostaErro: FieldValue.delete()
+        });
+        await recordMessage(cardDocument.id, {
+          direction: "outgoing",
+          type: "text",
+          text: numberData.preAtendimentoMessage,
+          apiMessageId,
+          phoneNumberId: numberId,
+          status: "sent",
+          automatico: true,
+          origem: "pre-atendimento"
+        }, apiMessageId);
+      } catch (erro) {
+        await cardDocument.ref.update({
+          botRespostaErro: erro.message,
+          botRespostaEnviadaEm: FieldValue.delete()
+        });
+        console.error("Falha ao enviar pré-atendimento do WhatsApp:", erro.message);
+      }
+    }
+  }
+  await eventRef.update({ processed: true, cardId: cardDocument.id, processadoEm: FieldValue.serverTimestamp() });
+}
+
+async function processWebhookPayload(payload) {
+  for (const entry of payload.entry || []) {
+    for (const change of entry.changes || []) {
+      if (change.field !== "messages") continue;
+      const value = change.value || {};
+      const numberId = String(value.metadata && value.metadata.phone_number_id || "");
+      if (value.messages && numberId) {
+        const numberSnapshot = await db.collection("whatsappNumbers").doc(numberId).get();
+        if (numberSnapshot.exists && numberSnapshot.data().active && numberSnapshot.data().captureEnabled) {
+          const number = numberSnapshot.data();
+          const contacts = value.contacts || [];
+          for (const message of value.messages) {
+            const contact = contacts.find((item) => normalizePhone(item.wa_id) === normalizePhone(message.from)) || contacts[0];
+            await handleInboundMessage(numberId, message, contact, number);
+          }
+        }
+      }
+      for (const status of value.statuses || []) {
+        const jobs = await db.collection("whatsappJobs").where("apiMessageId", "==", status.id).get();
+        for (const job of jobs.docs) {
+          await job.ref.update({ statusMeta: status.status, atualizadoEm: FieldValue.serverTimestamp() });
+        }
+      }
+    }
+  }
+}
+
+exports.whatsappWebhook = onRequest({ region: REGION, timeoutSeconds: 120 }, async (request, response) => {
+  if (request.method === "GET") {
+    try {
+      const verifyToken = await readSecret("golden-whatsapp-verify-token");
+      if (request.query["hub.mode"] === "subscribe" &&
+          request.query["hub.verify_token"] === verifyToken &&
+          request.query["hub.challenge"]) {
+        response.status(200).type("text/plain").send(String(request.query["hub.challenge"]));
+        return;
+      }
+      response.sendStatus(403);
+    } catch (erro) {
+      console.error("Webhook WhatsApp ainda não configurado:", erro.message);
+      response.sendStatus(503);
+    }
+    return;
+  }
+  if (request.method !== "POST") {
+    response.sendStatus(405);
+    return;
+  }
+  const signature = String(request.get("x-hub-signature-256") || "");
+  const rawBody = request.rawBody;
+  if (!Buffer.isBuffer(rawBody) || !signature.startsWith("sha256=")) {
+    response.sendStatus(401);
+    return;
+  }
+  try {
+    const appSecret = await readSecret("golden-whatsapp-app-secret");
+    const expected = "sha256=" + crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex");
+    const expectedBuffer = Buffer.from(expected);
+    const actualBuffer = Buffer.from(signature);
+    if (expectedBuffer.length !== actualBuffer.length ||
+        !crypto.timingSafeEqual(expectedBuffer, actualBuffer)) {
+      response.sendStatus(401);
+      return;
+    }
+    await processWebhookPayload(JSON.parse(rawBody.toString("utf8")));
+    response.sendStatus(200);
+  } catch (erro) {
+    console.error("Falha ao processar webhook do WhatsApp:", erro.message);
+    response.sendStatus(500);
+  }
+});
+
+exports.syncWhatsAppCardJobs = onDocumentWritten(
+  { document: "cards/{cardId}", region: REGION, timeoutSeconds: 120 },
+  async (event) => {
+    const before = event.data.before.exists ? event.data.before.data() : null;
+    const after = event.data.after.exists ? event.data.after.data() : null;
+    const cardId = event.params.cardId;
+    const oldProgramacao = before && before.programacao;
+    const newProgramacao = after && after.programacao;
+    const scheduleChanged = oldProgramacao && oldProgramacao.status === "aguardando_envio" &&
+      (      !newProgramacao || newProgramacao.status !== "aguardando_envio" ||
+        JSON.stringify([
+          timestampFrom(newProgramacao.dataHora) && timestampFrom(newProgramacao.dataHora).toMillis(),
+          newProgramacao.phoneNumberId,
+          newProgramacao.tipoMensagem,
+          newProgramacao.texto,
+      newProgramacao.templateName,
+      newProgramacao.templateVariables
+        ]) !== JSON.stringify([
+          timestampFrom(oldProgramacao.dataHora) && timestampFrom(oldProgramacao.dataHora).toMillis(),
+          oldProgramacao.phoneNumberId,
+          oldProgramacao.tipoMensagem,
+          oldProgramacao.texto,
+      oldProgramacao.templateName,
+      oldProgramacao.templateVariables
+        ]));
+    if (scheduleChanged) {
+      const oldScheduledAt = timestampFrom(oldProgramacao.dataHora);
+      await cancelScheduledJobsForCard(cardId, "card", null, oldScheduledAt && oldScheduledAt.toMillis());
+    }
+    if (!after || after.excluido) {
+      await cancelScheduledJobsForCard(cardId);
+      return;
+    }
+    if (after.programacao && after.programacao.status === "aguardando_envio") {
+      await scheduleCardJob(cardId, after.programacao);
+    }
+    if (before && before.colunaId !== after.colunaId) {
+      await cancelScheduledJobsForCard(cardId, "column", before.colunaId);
+    }
+    if (!before || before.colunaId !== after.colunaId) {
+      const columnSnapshot = await db.collection("colunas").doc(after.colunaId).get();
+      if (columnSnapshot.exists && columnSnapshot.data().tipo === "funcionaria") {
+        await scheduleColumnJobs(after.colunaId, columnSnapshot.data(), [{ id: cardId, data: () => after }]);
+      }
+    }
+  }
+);
+
+exports.syncWhatsAppColumnJobs = onDocumentWritten(
+  { document: "colunas/{columnId}", region: REGION, timeoutSeconds: 120 },
+  async (event) => {
+    const columnId = event.params.columnId;
+    const after = event.data.after.exists ? event.data.after.data() : null;
+    const before = event.data.before.exists ? event.data.before.data() : null;
+    const oldConfig = before && before.configFuncionaria;
+    const newConfig = after && after.configFuncionaria;
+    if (JSON.stringify(oldConfig || null) === JSON.stringify(newConfig || null)) return;
+    const snapshot = await db.collection("whatsappJobs").where("columnId", "==", columnId).get();
+    const batch = db.batch();
+    let count = 0;
+    snapshot.docs.forEach((job) => {
+      if (job.data().status === "scheduled") {
+        batch.update(job.ref, { status: "cancelled", erro: "A configuração da coluna foi alterada." });
+        count += 1;
+      }
+    });
+    if (count) await batch.commit();
+    if (!after || after.tipo !== "funcionaria") return;
+    const cards = await db.collection("cards").where("colunaId", "==", columnId).get();
+    await scheduleColumnJobs(columnId, after, cards.docs);
+  }
+);
+
+exports.dispatchWhatsAppJobs = onSchedule(
+  { schedule: "every 1 minutes", timeZone: "America/Sao_Paulo", region: REGION, timeoutSeconds: 540, memory: "512MiB" },
+  async () => {
+    const [scheduledSnapshot, acceptedSnapshot, finalizingSnapshot, sendingSnapshot] = await Promise.all([
+      db.collection("whatsappJobs").where("status", "==", "scheduled").get(),
+      db.collection("whatsappJobs").where("status", "==", "accepted").get(),
+      db.collection("whatsappJobs").where("status", "==", "finalizing").get(),
+      db.collection("whatsappJobs").where("status", "==", "sending").get()
+    ]);
+    const dueScheduled = scheduledSnapshot.docs
+      .filter((job) => {
+        const scheduledAt = job.data().scheduledAt;
+        return scheduledAt && scheduledAt.toMillis() <= Date.now();
+      })
+      .sort((a, b) => a.data().scheduledAt.toMillis() - b.data().scheduledAt.toMillis());
+    const recoverFinalizing = finalizingSnapshot.docs.filter((job) =>
+      job.data().lockedAt && Date.now() - job.data().lockedAt.toMillis() > 10 * 60 * 1000
+    );
+    const recoverSending = sendingSnapshot.docs.filter((job) =>
+      job.data().lockedAt && Date.now() - job.data().lockedAt.toMillis() > 10 * 60 * 1000
+    );
+    const due = [
+      ...acceptedSnapshot.docs,
+      ...recoverFinalizing,
+      ...recoverSending,
+      ...dueScheduled
+    ].slice(0, 100);
+    for (const job of due) await processScheduledJob(job);
+  }
+);

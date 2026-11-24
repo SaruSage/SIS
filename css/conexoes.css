@@ -1,0 +1,257 @@
+.conexoes-painel {
+  margin: 22px 0;
+  padding: 24px;
+  border: 1px solid var(--borda);
+  border-radius: 16px;
+  background: var(--branco);
+  box-shadow: var(--sombra);
+}
+
+.conexoes-titulo-secao {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.conexoes-titulo-secao h2 {
+  margin: 0 0 6px;
+  color: var(--texto);
+  font-size: 17px;
+}
+
+.conexoes-titulo-secao p,
+.conexoes-form-acoes p {
+  margin: 0;
+  color: var(--texto-sec);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.conexoes-status,
+.conexoes-selo {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #e8f7ef;
+  color: #167447;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.conexoes-status.vazio {
+  background: #f1f3f6;
+  color: var(--texto-sec);
+}
+
+.conexoes-form-wrap {
+  padding: 20px;
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  background: var(--fundo);
+}
+
+.conexoes-form-wrap h3 {
+  margin: 0 0 16px;
+  font-size: 14px;
+}
+
+.conexoes-form,
+.conexoes-bot-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+}
+
+.conexoes-form label,
+.conexoes-bot-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--texto);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.conexoes-form input,
+.conexoes-form select,
+.conexoes-bot-form input:not([type="checkbox"]),
+.conexoes-bot-form select,
+.conexoes-bot-form textarea {
+  width: 100%;
+  min-height: 42px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--borda);
+  border-radius: 9px;
+  background: var(--branco);
+  color: var(--texto);
+  font: inherit;
+  font-size: 13px;
+}
+
+.conexoes-bot-form textarea {
+  resize: vertical;
+}
+
+.conexoes-form-acoes {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.conexoes-form > .texto-ajuda {
+  grid-column: 1 / -1;
+}
+
+.conexoes-botao-primario,
+.conexoes-botao-secundario,
+.conexoes-botao-perigo {
+  width: auto;
+  min-height: 38px;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--azul);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.conexoes-botao-secundario {
+  border-color: var(--borda);
+  background: var(--branco);
+  color: var(--texto);
+}
+
+.conexoes-botao-perigo {
+  border-color: #f0c5c5;
+  background: #fff4f4;
+  color: #b42323;
+}
+
+.conexoes-botao-primario:disabled,
+.conexoes-botao-secundario:disabled,
+.conexoes-botao-perigo:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
+.conexoes-lista-numeros {
+  display: grid;
+  gap: 12px;
+}
+
+.conexoes-numero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 16px;
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+}
+
+.conexoes-numero h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.conexoes-numero p {
+  margin: 0;
+  color: var(--texto-sec);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.conexoes-numero-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.conexoes-checkbox {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 9px !important;
+}
+
+.conexoes-checkbox input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  accent-color: var(--azul);
+}
+
+.conexoes-aviso {
+  display: none;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.conexoes-aviso.visivel {
+  display: block;
+}
+
+.conexoes-aviso.erro {
+  background: #fff1f0;
+  color: #a4261a;
+}
+
+.conexoes-aviso.sucesso {
+  background: #e8f7ef;
+  color: #167447;
+}
+
+body.tema-escuro .conexoes-painel,
+body.tema-escuro .conexoes-numero,
+body.tema-escuro .conexoes-form-wrap {
+  background: #172235;
+  border-color: #2a3950;
+}
+
+body.tema-escuro .conexoes-form input,
+body.tema-escuro .conexoes-form select,
+body.tema-escuro .conexoes-bot-form input,
+body.tema-escuro .conexoes-bot-form select,
+body.tema-escuro .conexoes-bot-form textarea {
+  background: #101a2b;
+  border-color: #34445c;
+  color: #e8edf5;
+}
+
+@media (max-width: 760px) {
+  .conexoes-form,
+  .conexoes-bot-form {
+    grid-template-columns: 1fr;
+  }
+
+  .conexoes-numero {
+    grid-template-columns: 1fr;
+  }
+
+  .conexoes-numero-acoes {
+    justify-content: flex-start;
+  }
+
+  .conexoes-form-acoes {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .conexoes-form-acoes button {
+    width: 100%;
+  }
+}

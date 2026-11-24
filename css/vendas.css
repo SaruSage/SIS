@@ -566,6 +566,11 @@ body.tema-escuro .seletor-prioridade:focus {
               border-color 0.15s;
 }
 
+.kanban[data-reordenacao-ativa="true"] .cabecalho-coluna {
+  cursor: grab;
+  touch-action: none;
+}
+
 .cabecalho-coluna.cabecalho-isolado {
   border-bottom-left-radius: 14px;
   border-bottom-right-radius: 14px;
@@ -1735,6 +1740,7 @@ input.cal-input-tempo,
   margin-bottom: 0 !important;
   box-shadow: none !important;
   box-sizing: border-box !important;
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 

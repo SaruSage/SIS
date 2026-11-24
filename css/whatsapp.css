@@ -1,0 +1,117 @@
+.whatsapp-conversa {
+  width: min(680px, 100%);
+}
+
+.whatsapp-conversa-lista {
+  display: flex;
+  min-height: 160px;
+  max-height: 42vh;
+  flex-direction: column;
+  gap: 9px;
+  overflow: auto;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  background: var(--fundo);
+  color: var(--texto-sec);
+  font-size: 13px;
+}
+
+.whatsapp-mensagem {
+  max-width: 82%;
+  padding: 9px 11px;
+  border-radius: 11px;
+  background: var(--branco);
+  color: var(--texto);
+  box-shadow: var(--sombra);
+}
+
+.whatsapp-mensagem p {
+  margin: 0 0 5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.whatsapp-mensagem small {
+  display: block;
+  color: var(--texto-sec);
+  font-size: 10px;
+}
+
+.whatsapp-mensagem-saida {
+  align-self: flex-end;
+  background: #e8f7ef;
+}
+
+.whatsapp-mensagem-form,
+.whatsapp-conversa-form {
+  display: grid;
+  gap: 12px;
+}
+
+.whatsapp-conversa-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--texto);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.whatsapp-conversa-form input,
+.whatsapp-conversa-form select,
+.whatsapp-conversa-form textarea {
+  width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--borda);
+  border-radius: 9px;
+  background: var(--branco);
+  color: var(--texto);
+  font: inherit;
+  font-size: 13px;
+}
+
+.whatsapp-conversa-form textarea {
+  resize: vertical;
+}
+
+.whatsapp-template-wrap {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.whatsapp-template-wrap[hidden] {
+  display: none;
+}
+
+body.tema-escuro .whatsapp-conversa-lista {
+  background: #101a2b;
+  border-color: #34445c;
+}
+
+body.tema-escuro .whatsapp-mensagem {
+  background: #1b2a40;
+  color: #e8edf5;
+}
+
+body.tema-escuro .whatsapp-mensagem-saida {
+  background: #174432;
+}
+
+body.tema-escuro .whatsapp-conversa-form input,
+body.tema-escuro .whatsapp-conversa-form select,
+body.tema-escuro .whatsapp-conversa-form textarea {
+  background: #101a2b;
+  border-color: #34445c;
+  color: #e8edf5;
+}
+
+@media (max-width: 620px) {
+  .whatsapp-template-wrap {
+    grid-template-columns: 1fr;
+  }
+}

@@ -101,10 +101,13 @@ const contagemPendentes = document.getElementById("contagem-pendentes");
 const botaoGerar = document.getElementById("botao-gerar-codigo");
 const areaCodigoGerado = document.getElementById("area-codigo-gerado");
 const listaSolicitacoes = document.getElementById("lista-solicitacoes");
+const buscaUsuarios = document.getElementById("busca-usuarios");
 const botaoSair = document.getElementById("botao-sair");
 const areaMensagem = document.getElementById("mensagem");
 
 let filtroAtual = "pendente";
+let filtroAntesBusca = filtroAtual;
+let buscaAtiva = false;
 
 // "Cache" local das solicitações. O onSnapshot o mantém sempre
 // atualizado; as funções de renderização apenas o leem.
@@ -181,13 +184,30 @@ async function usuarioTemCargoAdmin(email) {
 // ------------------------------------------------------------
 // NAVEGAÇÃO ENTRE ABAS
 // ------------------------------------------------------------
-document.querySelectorAll(".aba-adm").forEach((botao) => {
+const abasAdm = document.querySelectorAll(".aba-adm");
+
+function selecionarFiltro(filtro) {
+  filtroAtual = filtro;
+  abasAdm.forEach((botao) => botao.classList.toggle("ativa", botao.dataset.filtro === filtro));
+}
+
+abasAdm.forEach((botao) => {
   botao.addEventListener("click", () => {
-    document.querySelectorAll(".aba-adm").forEach((b) => b.classList.remove("ativa"));
-    botao.classList.add("ativa");
-    filtroAtual = botao.dataset.filtro;
+    selecionarFiltro(botao.dataset.filtro);
     renderizarSolicitacoes();
   });
+});
+
+buscaUsuarios.addEventListener("input", () => {
+  const temBusca = buscaUsuarios.value.trim().length > 0;
+  if (temBusca && !buscaAtiva) {
+    filtroAntesBusca = filtroAtual;
+    selecionarFiltro("todos");
+  } else if (!temBusca && buscaAtiva && filtroAtual === "todos") {
+    selecionarFiltro(filtroAntesBusca);
+  }
+  buscaAtiva = temBusca;
+  renderizarSolicitacoes();
 });
 
 // ------------------------------------------------------------
@@ -219,13 +239,34 @@ function escutarSolicitacoes() {
 function renderizarSolicitacoes() {
   if (!listaSolicitacoes) return;
 
-  if (filtroAtual === "pendente") {
-    renderizarPendentes();
-  } else if (filtroAtual === "aprovada") {
-    renderizarAprovados();
-  } else if (filtroAtual === "rejeitada") {
-    renderizarRejeitados();
+  const termo = buscaUsuarios.value.trim().toLowerCase();
+  const resultados = cacheSolicitacoes.filter((solicitacao) => {
+    const grupo = ["aprovada", "bloqueada", "excluida"].includes(solicitacao.status)
+      ? "aprovada" : solicitacao.status;
+    return ["pendente", "aprovada", "rejeitada"].includes(grupo) &&
+      (filtroAtual === "todos" || filtroAtual === grupo) &&
+      [solicitacao.nome, solicitacao.email].some((valor) =>
+        (valor || "").toLowerCase().includes(termo));
+  });
+  listaSolicitacoes.innerHTML = "";
+  if (!resultados.length) {
+    const mensagens = {
+      pendente: "Nenhuma solicitação pendente no momento.",
+      aprovada: "Nenhum usuário aprovado ainda.",
+      rejeitada: "Nenhuma solicitação rejeitada ainda.",
+      todos: "Nenhuma solicitação cadastrada ainda."
+    };
+    const mensagem = document.createElement("p");
+    mensagem.className = "texto-ajuda";
+    mensagem.textContent = termo ? "Nenhum usuário encontrado para a busca." : mensagens[filtroAtual];
+    listaSolicitacoes.appendChild(mensagem);
+    return;
   }
+
+  renderizarPendentes(resultados.filter((s) => s.status === "pendente"));
+  renderizarAprovados(resultados.filter((s) =>
+    ["aprovada", "bloqueada", "excluida"].includes(s.status)));
+  renderizarRejeitados(resultados.filter((s) => s.status === "rejeitada"));
 }
 
 // ------------------------------------------------------------
@@ -297,16 +338,7 @@ function criarSeletorCargo(cargoAtual) {
 // ------------------------------------------------------------
 // ABA 1 — PENDENTES (aprovar / rejeitar)
 // ------------------------------------------------------------
-function renderizarPendentes() {
-  const pendentes = cacheSolicitacoes.filter((s) => s.status === "pendente");
-
-  if (pendentes.length === 0) {
-    listaSolicitacoes.innerHTML =
-      '<p class="texto-ajuda">Nenhuma solicitação pendente no momento.</p>';
-    return;
-  }
-
-  listaSolicitacoes.innerHTML = "";
+function renderizarPendentes(pendentes) {
   pendentes.forEach((solicitacao) => {
     const cartao = criarCartao(solicitacao, "Aguardando decisão", "etiqueta-pendente");
     const seletor = criarSeletorCargo(solicitacao.cargo);
@@ -332,18 +364,7 @@ function renderizarPendentes() {
 // ------------------------------------------------------------
 // ABA 2 — APROVADOS (alterar cargo / bloquear / excluir / reativar)
 // ------------------------------------------------------------
-function renderizarAprovados() {
-  const ativos = cacheSolicitacoes.filter((s) =>
-    s.status === "aprovada" || s.status === "bloqueada" || s.status === "excluida"
-  );
-
-  if (ativos.length === 0) {
-    listaSolicitacoes.innerHTML =
-      '<p class="texto-ajuda">Nenhum usuário aprovado ainda.</p>';
-    return;
-  }
-
-  listaSolicitacoes.innerHTML = "";
+function renderizarAprovados(ativos) {
   ativos.forEach((solicitacao) => {
     const acoes = document.createElement("div");
     acoes.className = "acoes-solicitacao";
@@ -390,16 +411,7 @@ function renderizarAprovados() {
 // ------------------------------------------------------------
 // ABA 3 — REJEITADOS (somente histórico, sem botões)
 // ------------------------------------------------------------
-function renderizarRejeitados() {
-  const rejeitados = cacheSolicitacoes.filter((s) => s.status === "rejeitada");
-
-  if (rejeitados.length === 0) {
-    listaSolicitacoes.innerHTML =
-      '<p class="texto-ajuda">Nenhuma solicitação rejeitada ainda.</p>';
-    return;
-  }
-
-  listaSolicitacoes.innerHTML = "";
+function renderizarRejeitados(rejeitados) {
   rejeitados.forEach((solicitacao) => {
     const cartao = criarCartao(solicitacao, "Rejeitado", "etiqueta-rejeitada");
     listaSolicitacoes.appendChild(cartao);
