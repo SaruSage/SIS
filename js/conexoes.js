@@ -20,6 +20,10 @@ const aviso = document.getElementById("aviso-conexoes");
 const statusIntegracao = document.getElementById("status-integracao");
 const formConectarWrap = document.getElementById("form-conectar-wrap");
 const formConectar = document.getElementById("form-conectar");
+const campoAppId = document.getElementById("app-id");
+const appsMeta = document.getElementById("apps-meta");
+const campoWebhookUrl = document.getElementById("webhook-url");
+const botaoCopiarWebhook = document.getElementById("copiar-webhook");
 const listaNumeros = document.getElementById("lista-numeros");
 const campoBusca = document.getElementById("campo-busca");
 const formBot = document.getElementById("form-bot");
@@ -30,6 +34,7 @@ const formNovaConversa = document.getElementById("form-nova-conversa");
 
 let ehAdmin = false;
 let numeros = [];
+let appIdAnterior = "";
 
 function mostrarAviso(texto, tipo) {
   aviso.textContent = texto;
@@ -53,6 +58,61 @@ function criarBotao(texto, classe, acao) {
   botao.addEventListener("click", acao);
   return botao;
 }
+
+function atualizarWebhook() {
+  const appId = campoAppId.value.trim();
+  const projeto = functions.app.options.projectId;
+  const regiao = functions.region;
+  const configuracaoValida = !functions.customDomain &&
+    typeof projeto === "string" && /^[a-z0-9-]+$/.test(projeto) &&
+    typeof regiao === "string" && /^[a-z0-9-]+$/.test(regiao);
+  campoWebhookUrl.value = /^\d{6,25}$/.test(appId) && configuracaoValida
+    ? `https://${regiao}-${projeto}.cloudfunctions.net/whatsappWebhook/${appId}`
+    : "";
+  botaoCopiarWebhook.disabled = !campoWebhookUrl.value;
+  campoWebhookUrl.placeholder = configuracaoValida
+    ? "Informe um App ID válido"
+    : "Consulte a URL da função após o deploy e acrescente o App ID";
+}
+
+function preencherAppsMeta() {
+  const apps = [...new Set(numeros.map((numero) => numero.appId).filter((appId) =>
+    typeof appId === "string" && /^\d{6,25}$/.test(appId)
+  ))].sort();
+  appsMeta.replaceChildren(...apps.map((appId) => new Option(appId, appId)));
+}
+
+function alterarAppId() {
+  const appId = campoAppId.value.trim();
+  if (appId !== appIdAnterior) {
+    formConectar.elements.accessToken.value = "";
+    formConectar.elements.appSecret.value = "";
+    formConectar.elements.verifyToken.value = "";
+    appIdAnterior = appId;
+  }
+  atualizarWebhook();
+}
+
+campoAppId.addEventListener("input", alterarAppId);
+campoAppId.addEventListener("change", alterarAppId);
+
+botaoCopiarWebhook.addEventListener("click", async () => {
+  if (!campoWebhookUrl.value) {
+    mostrarAviso("Informe um App ID válido para obter a URL do webhook.", "erro");
+    return;
+  }
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {
+      throw new Error("Área de transferência indisponível.");
+    }
+    await navigator.clipboard.writeText(campoWebhookUrl.value);
+    mostrarAviso("URL do webhook copiada. Confirme a URL da função após o deploy.", "sucesso");
+  } catch (erro) {
+    campoWebhookUrl.focus();
+    campoWebhookUrl.select();
+    mostrarAviso("Não foi possível copiar automaticamente. A URL foi selecionada para cópia manual.", "erro");
+  }
+});
 
 onAuthStateChanged(auth, async (usuario) => {
   if (!usuario) {
@@ -132,6 +192,7 @@ function renderizarNumeros() {
     const informacoes = criarElemento("div");
     informacoes.appendChild(criarElemento("h3", "", numero.displayPhoneNumber || numero.phoneNumberId));
     informacoes.appendChild(criarElemento("p", "", (numero.verifiedName || "WhatsApp Business") + " · ID " + numero.phoneNumberId));
+    informacoes.appendChild(criarElemento("p", "", numero.appId ? "App ID: " + numero.appId : "Vínculo legado sem App ID"));
     informacoes.appendChild(criarElemento("p", "", "Captação de conversas: " + (numero.captureEnabled ? "ativada" : "desativada") +
       (numero.active ? "" : " · número desconectado")));
     const acoes = criarElemento("div", "conexoes-numero-acoes");
@@ -154,6 +215,7 @@ function renderizarNumeros() {
 campoBusca.addEventListener("input", renderizarNumeros);
 
 function preencherSeletores() {
+  preencherAppsMeta();
   [seletorBot, ...document.querySelectorAll(".seletor-numeros")].forEach((seletor) => {
     const atual = seletor.value;
     seletor.replaceChildren(new Option("Selecione um número", ""));
@@ -223,11 +285,18 @@ formConectar.addEventListener("submit", async (evento) => {
     if (existente >= 0) numeros[existente] = resultado.number;
     else numeros.push(resultado.number);
     formConectar.reset();
+    campoAppId.value = dados.appId.trim();
+    appIdAnterior = campoAppId.value;
+    atualizarWebhook();
     renderizarNumeros();
     preencherSeletores();
     statusIntegracao.textContent = numeros.length + (numeros.length === 1 ? " número vinculado" : " números vinculados");
     statusIntegracao.classList.remove("vazio");
-    mostrarAviso("Número validado e vinculado. Configure o webhook indicado nas instruções de implantação para receber mensagens.", "sucesso");
+    if (resultado.number.appId === dados.appId.trim()) {
+      mostrarAviso("Número vinculado ao app. Confirme a URL da função após o deploy e configure o webhook na Meta.", "sucesso");
+    } else {
+      mostrarAviso("O número foi vinculado, mas o backend não confirmou o App ID. Atualize as Functions antes de configurar o webhook específico.", "erro");
+    }
   } catch (erro) {
     console.error("Erro ao vincular número WhatsApp:", erro);
     mostrarAviso(erro.message || "Não foi possível vincular o número.", "erro");

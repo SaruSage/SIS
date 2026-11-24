@@ -2,27 +2,51 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function administradorPrincipal() {
+      return request.auth != null &&
+        request.auth.token.email == "eamgfn4ever@gmail.com" &&
+        request.auth.token.email_verified == true;
+    }
+
     match /codigosAdesao/{documento} {
       allow read, update: if true;
       allow create, delete: if request.auth != null;
     }
 
     match /solicitacoes/{documento} {
-      allow create: if true;
-      allow read, update, delete: if request.auth != null;
+      allow create: if request.resource.data.keys().hasOnly([
+          "nome", "email", "senha", "cargo", "codigo", "status", "criadoEm"
+        ]) &&
+        request.resource.data.keys().hasAll([
+          "nome", "email", "senha", "cargo", "codigo", "status", "criadoEm"
+        ]) &&
+        request.resource.data.nome is string &&
+        request.resource.data.email is string &&
+        request.resource.data.senha is string &&
+        request.resource.data.cargo in ["estoque", "vendas", "producao"] &&
+        request.resource.data.codigo is string &&
+        request.resource.data.status == "pendente" &&
+        request.resource.data.criadoEm is timestamp;
+      allow read: if request.auth != null;
+      allow update, delete: if administradorPrincipal();
     }
 
-    function somenteBackend(colecao, caminhoDocumento) {
-      return colecao == "whatsappNumbers" ||
+    function colecaoRestrita(colecao) {
+      return colecao == "solicitacoes" ||
+        colecao == "whatsappNumbers" ||
         colecao == "whatsappJobs" ||
-        colecao == "whatsappWebhookEvents" ||
-        (colecao == "cards" &&
-          caminhoDocumento.matches('^.*/mensagensWhatsapp/[^/]+$'));
+        colecao == "whatsappWebhookEvents";
     }
 
-    match /{colecao}/{caminhoDocumento=**} {
+    match /{colecao}/{documento} {
       allow read, write: if request.auth != null &&
-        !somenteBackend(colecao, caminhoDocumento);
+        !colecaoRestrita(colecao);
+    }
+
+    match /{colecao}/{documento}/{subcolecao}/{caminhoDocumento=**} {
+      allow read, write: if request.auth != null &&
+        !colecaoRestrita(colecao) &&
+        !(colecao == "cards" && subcolecao == "mensagensWhatsapp");
     }
   }
 }

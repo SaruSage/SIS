@@ -147,14 +147,25 @@
             <div id="form-conectar-wrap" class="conexoes-form-wrap" hidden>
               <h3>Vincular número</h3>
               <form id="form-conectar" class="conexoes-form">
+                <label>App ID do Meta for Developers
+                  <input id="app-id" name="appId" list="apps-meta" required inputmode="numeric" pattern="[0-9]{6,25}" maxlength="25" autocomplete="off" placeholder="Informe ou selecione um App ID">
+                  <datalist id="apps-meta"></datalist>
+                </label>
                 <label>Phone Number ID<input name="phoneNumberId" required inputmode="numeric" placeholder="ID do número no Meta for Developers"></label>
                 <label>WhatsApp Business Account ID<input name="wabaId" required inputmode="numeric" placeholder="ID da conta empresarial"></label>
                 <label>Token de acesso permanente<input name="accessToken" type="password" required autocomplete="new-password"></label>
                 <label>App Secret<input name="appSecret" type="password" required autocomplete="new-password"></label>
                 <label>Token de verificação do webhook<input name="verifyToken" type="password" required minlength="8" autocomplete="new-password"></label>
-                <p class="texto-ajuda">Use um token de verificação escolhido por você e informe o mesmo valor no painel da Meta. Guarde-o antes de vincular: por segurança, ele não será exibido novamente.</p>
+                <p class="texto-ajuda">Selecione um app associado a um número existente ou informe outro App ID. Para um app já cadastrado, informe novamente o mesmo App Secret e token de verificação; eles não são exibidos depois de salvos. Ao trocar de app, as credenciais digitadas são apagadas.</p>
                 <div class="conexoes-form-acoes">
-                  <p>O mesmo App Secret e token de verificação podem ser usados ao vincular outros números do mesmo app Meta.</p>
+                  <label for="webhook-url" style="flex: 1; min-width: 0;">URL prevista do webhook para este app
+                    <input id="webhook-url" type="text" readonly placeholder="Informe um App ID válido" aria-describedby="webhook-ajuda">
+                  </label>
+                  <button type="button" id="copiar-webhook" class="conexoes-botao-secundario" disabled>Copiar URL</button>
+                </div>
+                <p class="texto-ajuda" id="webhook-ajuda">A URL usa o projeto e a região configurados. Confirme a URL da função após o deploy e acrescente o App ID; a conexão só funcionará após a implantação e a configuração na Meta.</p>
+                <div class="conexoes-form-acoes">
+                  <p>Escolha o token de verificação e informe o mesmo valor no painel da Meta. Guarde as credenciais com segurança.</p>
                   <button type="submit" class="conexoes-botao-primario">Vincular número</button>
                 </div>
               </form>
