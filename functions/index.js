@@ -96,13 +96,18 @@ async function saveSecret(secretId, value) {
 
 async function readSecret(secretId, versionName) {
   const path = secretPath(secretId);
-  const versionPrefix = path + "/versions/";
-  if (versionName && (!versionName.startsWith(versionPrefix) || !/^\d+$/.test(versionName.slice(versionPrefix.length)))) {
+  let name = path + "/versions/latest";
+  if (versionName) {
+    const match = /^projects\/([^/]+)\/secrets\/([^/]+)\/versions\/([1-9]\d*)$/.exec(versionName);
+    if (!match || match[2] !== secretId) {
+      throw new Error("Versão de segredo inválida para " + secretId + ".");
+    }
+    name = path + "/versions/" + match[3];
+  }
+  const [version] = await secretManager.accessSecretVersion({ name });
+  if (versionName && versionName !== name && versionName !== version.name) {
     throw new Error("Versão de segredo inválida para " + secretId + ".");
   }
-  const [version] = await secretManager.accessSecretVersion({
-    name: versionName || path + "/versions/latest"
-  });
   if (!version.payload || !version.payload.data) throw new Error("O segredo " + secretId + " está vazio.");
   return Buffer.from(version.payload.data).toString("utf8");
 }
@@ -127,35 +132,25 @@ async function readAppSecret(appId, app, type) {
   return readSecret(appSecretId(appId, type), version);
 }
 
-async function ensureWhatsAppApp(appId, appSecret, verifyToken) {
-  const ref = appRef(appId);
-  let snapshot = await ref.get();
-  if (!snapshot.exists) {
-    const [appSecretVersion, verifyTokenVersion] = await Promise.all([
-      saveSecret(appSecretId(appId, "secret"), appSecret),
-      saveSecret(appSecretId(appId, "verify-token"), verifyToken)
-    ]);
-    try {
-      await ref.create({
-        appId,
-        appSecretVersion,
-        verifyTokenVersion,
-        criadoEm: FieldValue.serverTimestamp()
-      });
-    } catch (erro) {
-      if (erro.code !== 6) throw erro;
-    }
-    snapshot = await ref.get();
-  }
-  if (!snapshot.exists) throw new Error("Não foi possível registrar o app WhatsApp.");
-  const app = snapshot.data();
-  const [savedSecret, savedVerifyToken] = await Promise.all([
-    readAppSecret(appId, app, "secret"),
-    readAppSecret(appId, app, "verify-token")
+async function prepareWhatsAppApp(appId, appSecret, verifyToken) {
+  const [appSecretVersion, verifyTokenVersion] = await Promise.all([
+    saveSecret(appSecretId(appId, "secret"), appSecret),
+    saveSecret(appSecretId(appId, "verify-token"), verifyToken)
   ]);
-  if (savedSecret !== appSecret || savedVerifyToken !== verifyToken) {
-    throw new HttpsError("failed-precondition", "As credenciais informadas diferem das credenciais já cadastradas para este app.");
-  }
+  return { appId, appSecretVersion, verifyTokenVersion };
+}
+
+function logSecretError(erro, credentials) {
+  const redact = (value) => {
+    if (typeof value !== "string" && typeof value !== "number") return undefined;
+    return credentials.reduce((text, credential) =>
+      credential ? text.split(credential).join("[REDACTED]") : text, String(value));
+  };
+  console.error("Falha ao guardar credenciais no Secret Manager:", {
+    code: redact(erro.code),
+    message: redact(erro.message),
+    details: redact(erro.details)
+  });
 }
 
 function publicNumber(documento) {
@@ -207,6 +202,26 @@ async function graphRequest(url, accessToken, options) {
     throw new Error("Meta Graph API (" + (codigo || response.status) + "): " + (detalhe || "a solicitação foi recusada."));
   }
   return body;
+}
+
+async function findWhatsAppNumber(wabaId, phoneNumberId, accessToken) {
+  const seenCursors = new Set();
+  let after = "";
+  do {
+    const url = META_GRAPH + "/" + wabaId +
+      "/phone_numbers?fields=id,display_phone_number,verified_name&limit=100" +
+      (after ? "&after=" + encodeURIComponent(after) : "");
+    const page = await graphRequest(url, accessToken);
+    if (!Array.isArray(page.data)) throw new Error("A Meta retornou uma lista de números inválida.");
+    const number = page.data.find((item) => item && item.id === phoneNumberId);
+    if (number) return number;
+    if (!page.paging || !page.paging.next) return null;
+    after = page.paging.cursors && page.paging.cursors.after;
+    if (typeof after !== "string" || !after || seenCursors.has(after)) {
+      throw new Error("A Meta retornou uma paginação de números inválida.");
+    }
+    seenCursors.add(after);
+  } while (true);
 }
 
 function montarPayloadMensagem(dados) {
@@ -641,10 +656,8 @@ exports.connectWhatsAppNumber = onCall({ region: REGION, timeoutSeconds: 120 }, 
 
   let metaNumber;
   try {
-    metaNumber = await graphRequest(
-      META_GRAPH + "/" + phoneNumberId + "?fields=display_phone_number,verified_name",
-      accessToken
-    );
+    metaNumber = await findWhatsAppNumber(wabaId, phoneNumberId, accessToken);
+    if (!metaNumber) throw new Error("O Phone Number ID informado não pertence à WABA informada.");
     await graphRequest(
       META_GRAPH + "/" + wabaId + "/subscribed_apps",
       accessToken,
@@ -655,9 +668,10 @@ exports.connectWhatsAppNumber = onCall({ region: REGION, timeoutSeconds: 120 }, 
   }
 
   let tokenVersion;
+  let appData;
   try {
     if (appId) {
-      await ensureWhatsAppApp(appId, appSecret, verifyToken);
+      appData = await prepareWhatsAppApp(appId, appSecret, verifyToken);
       tokenVersion = await saveSecret(tokenSecretId(phoneNumberId), accessToken);
     } else {
       await Promise.all([
@@ -667,8 +681,8 @@ exports.connectWhatsAppNumber = onCall({ region: REGION, timeoutSeconds: 120 }, 
       ]);
     }
   } catch (erro) {
+    logSecretError(erro, [accessToken, appSecret, verifyToken].sort((a, b) => b.length - a.length));
     if (erro instanceof HttpsError) throw erro;
-    console.error("Falha ao guardar credenciais no Secret Manager:", erro.message);
     throw new HttpsError(
       "failed-precondition",
       "O número foi validado pela Meta, mas não foi possível proteger as credenciais no Secret Manager. Verifique as permissões da conta de execução das Functions."
@@ -691,6 +705,8 @@ exports.connectWhatsAppNumber = onCall({ region: REGION, timeoutSeconds: 120 }, 
     if (current.exists && current.data().appId && current.data().appId !== appId) {
       throw new HttpsError("failed-precondition", "Este número já está vinculado a outro app. Informe o App ID cadastrado.");
     }
+    const appDocument = appId ? appRef(appId) : null;
+    const currentApp = appDocument ? await transaction.get(appDocument) : null;
     const data = { ...defaultNumberData };
     if (appId && current.exists) {
       const previous = current.data();
@@ -698,13 +714,20 @@ exports.connectWhatsAppNumber = onCall({ region: REGION, timeoutSeconds: 120 }, 
         if (previous[field] !== undefined) data[field] = previous[field];
       }
     }
+    if (appDocument) {
+      transaction.set(appDocument, {
+        ...appData,
+        ...(!currentApp.exists ? { criadoEm: FieldValue.serverTimestamp() } : {}),
+        atualizadoEm: FieldValue.serverTimestamp()
+      }, { merge: true });
+    }
     transaction.set(numberRef, data, { merge: true });
     return data;
   });
   return {
     number: publicNumber({
       id: phoneNumberId,
-      data: () => ({ ...numberData, active: true })
+      data: () => numberData
     })
   };
 });

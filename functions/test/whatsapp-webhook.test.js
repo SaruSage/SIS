@@ -9,7 +9,9 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
 const project = "webhook-test";
+const projectNumber = "123456789012";
 const secretPrefix = `projects/${project}/secrets/`;
+const canonicalPrefix = `projects/${projectNumber}/secrets/`;
 
 const appA = {
   id: "1000001",
@@ -31,7 +33,16 @@ const appB = {
 function createHarness() {
   const documents = new Map();
   const secrets = new Map();
+  const secretResources = new Set();
   const errors = [];
+  const calls = [];
+  const failures = {};
+  const graphCalls = [];
+  const graphPages = new Map([
+    [`${appA.wabaId}:`, { data: [{ id: appA.phoneNumberId, display_phone_number: "Número A", verified_name: "Teste A" }] }],
+    [`${appB.wabaId}:`, { data: [{ id: appB.phoneNumberId, display_phone_number: "Número B", verified_name: "Teste B" }] }],
+    ["6000001:", { data: [{ id: "5000001", display_phone_number: "Número novo", verified_name: "Teste novo" }] }]
+  ]);
 
   function documentRef(documentPath) {
     const ref = {
@@ -88,9 +99,39 @@ function createHarness() {
   };
 
   class SecretManagerServiceClient {
+    async getSecret({ name }) {
+      if (!secretResources.has(name)) throw Object.assign(new Error("Secret não encontrado"), { code: 5 });
+      return [{ name: name.replace(secretPrefix, canonicalPrefix) }];
+    }
+
+    async createSecret({ parent, secretId }) {
+      const name = `${parent}/secrets/${secretId}`;
+      if (secretResources.has(name)) throw Object.assign(new Error("Secret já existe"), { code: 6 });
+      secretResources.add(name);
+      calls.push({ operation: "create", name });
+      return [{ name: name.replace(secretPrefix, canonicalPrefix) }];
+    }
+
+    async addSecretVersion({ parent, payload }) {
+      const failure = failures.addSecretVersion && failures.addSecretVersion(parent);
+      if (failure) throw failure;
+      const prefix = `${parent}/versions/`;
+      const versions = [...secrets.keys()]
+        .filter((name) => name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length)))
+        .map((name) => Number(name.slice(prefix.length)));
+      const version = Math.max(0, ...versions) + 1;
+      const name = `${prefix}${version}`;
+      secrets.set(name, payload.data.toString("utf8"));
+      calls.push({ operation: "addVersion", name });
+      return [{ name: name.replace(secretPrefix, canonicalPrefix) }];
+    }
+
     async accessSecretVersion({ name }) {
       if (!secrets.has(name)) throw new Error(`Segredo ausente: ${name}`);
-      return [{ payload: { data: Buffer.from(secrets.get(name)) } }];
+      return [{
+        name: name.replace(secretPrefix, canonicalPrefix),
+        payload: { data: Buffer.from(secrets.get(name)) }
+      }];
     }
   }
 
@@ -113,7 +154,9 @@ function createHarness() {
         return {
           onCall: (_, handler) => handler,
           onRequest: (_, handler) => handler,
-          HttpsError: class HttpsError extends Error {}
+          HttpsError: class HttpsError extends Error {
+            constructor(code, message) { super(message); this.code = code; }
+          }
         };
       case "firebase-functions/v2/scheduler":
         return { onSchedule: (_, handler) => handler };
@@ -128,6 +171,16 @@ function createHarness() {
     require: requireMock,
     exports,
     Buffer,
+    AbortSignal,
+    fetch: async (url, options) => {
+      const parsed = new URL(url);
+      graphCalls.push({ path: parsed.pathname, after: parsed.searchParams.get("after"), method: options.method || "GET" });
+      const wabaId = parsed.pathname.split("/")[2];
+      const body = parsed.pathname.endsWith("/phone_numbers")
+        ? graphPages.get(`${wabaId}:${parsed.searchParams.get("after") || ""}`)
+        : { success: true };
+      return { ok: true, json: async () => body };
+    },
     process: { env: { GCLOUD_PROJECT: project } },
     console: {
       warn() {},
@@ -140,10 +193,12 @@ function createHarness() {
     const verifyName = `${secretPrefix}golden-whatsapp-app-${app.id}-verify-token/versions/1`;
     secrets.set(secretName, app.secret);
     secrets.set(verifyName, app.verifyToken);
+    secretResources.add(secretName.replace(/\/versions\/1$/, ""));
+    secretResources.add(verifyName.replace(/\/versions\/1$/, ""));
     documents.set(`whatsappNumbers/_apps/apps/${app.id}`, {
       appId: app.id,
-      appSecretVersion: secretName,
-      verifyTokenVersion: verifyName
+      appSecretVersion: secretName.replace(secretPrefix, canonicalPrefix),
+      verifyTokenVersion: verifyName.replace(secretPrefix, canonicalPrefix)
     });
     documents.set(`whatsappNumbers/${app.phoneNumberId}`, {
       appId: app.id,
@@ -190,7 +245,7 @@ function createHarness() {
     return response;
   }
 
-  return { documents, secrets, errors, webhook };
+  return { documents, secrets, secretResources, errors, calls, failures, graphCalls, graphPages, webhook, connect: exports.connectWhatsAppNumber };
 }
 
 function messagePayload(app, messageId, wabaId = app.wabaId, phoneNumberId = app.phoneNumberId) {
@@ -351,4 +406,155 @@ test("segredo ausente de um app não usa os segredos globais como fallback", asy
   assert.equal((await h.webhook({ route: `/${appA.id}`, body, signingSecret: appA.secret })).statusCode, 500);
   assert.equal(h.documents.has("whatsappWebhookEvents/wamid-missing-secret"), false);
   assert.equal(h.errors.length, 2);
+});
+
+function connectRequest(app, overrides = {}) {
+  const adminEmail = source.match(/const ADMIN_EMAILS = \["([^"]+)"\]/)[1];
+  return {
+    auth: { uid: "test-admin", token: { email: adminEmail } },
+    data: {
+      appId: app.id,
+      phoneNumberId: app.phoneNumberId,
+      wabaId: app.wabaId,
+      accessToken: "test-access-token-123456789",
+      appSecret: app.secret,
+      verifyToken: app.verifyToken,
+      ...overrides
+    }
+  };
+}
+
+test("versões com ID ou número do projeto funcionam e referências de outro projeto são rejeitadas", async () => {
+  const h = createHarness();
+  const ref = `whatsappNumbers/_apps/apps/${appA.id}`;
+  const app = h.documents.get(ref);
+  assert.ok(app.verifyTokenVersion.startsWith(canonicalPrefix));
+  assert.equal((await h.webhook({ route: `/${appA.id}`, method: "GET", query: verifyQuery(appA.verifyToken) })).statusCode, 200);
+
+  h.documents.set(ref, {
+    ...app,
+    verifyTokenVersion: app.verifyTokenVersion.replace(canonicalPrefix, secretPrefix)
+  });
+  assert.equal((await h.webhook({ route: `/${appA.id}`, method: "GET", query: verifyQuery(appA.verifyToken) })).statusCode, 200);
+
+  h.documents.set(ref, {
+    ...app,
+    verifyTokenVersion: app.verifyTokenVersion.replace(canonicalPrefix, "projects/999999999999/secrets/")
+  });
+  assert.equal((await h.webhook({ route: `/${appA.id}`, method: "GET", query: verifyQuery(appA.verifyToken) })).statusCode, 503);
+});
+
+test("cadastro atualiza versões existentes sem recriar secrets e mantém as configurações do número", async () => {
+  const h = createHarness();
+  const appPath = `whatsappNumbers/_apps/apps/${appA.id}`;
+  const numberPath = `whatsappNumbers/${appA.phoneNumberId}`;
+  h.documents.set(appPath, { ...h.documents.get(appPath), criadoEm: "data-original" });
+  h.documents.set(numberPath, {
+    ...h.documents.get(numberPath), active: false, captureEnabled: false,
+    preAtendimentoEnabled: true, preAtendimentoMessage: "mensagem anterior"
+  });
+  const request = connectRequest(appA, {
+    appSecret: "updated-app-secret",
+    verifyToken: "updated-verify-token"
+  });
+  const result = await h.connect(request);
+
+  const app = h.documents.get(appPath);
+  const number = h.documents.get(numberPath);
+  assert.equal(app.appSecretVersion, `${canonicalPrefix}golden-whatsapp-app-${appA.id}-secret/versions/2`);
+  assert.equal(app.verifyTokenVersion, `${canonicalPrefix}golden-whatsapp-app-${appA.id}-verify-token/versions/2`);
+  assert.equal(app.criadoEm, "data-original");
+  assert.equal(number.captureEnabled, false);
+  assert.equal(number.preAtendimentoMessage, "mensagem anterior");
+  assert.equal(result.number.active, false);
+  assert.equal(result.number.captureEnabled, false);
+  assert.equal(h.calls.some((call) => call.operation === "create" && call.name.includes(`app-${appA.id}-`)), false);
+  assert.equal((await h.webhook({ route: `/${appA.id}`, method: "GET", query: verifyQuery("updated-verify-token") })).statusCode, 200);
+  assert.equal((await h.webhook({ route: `/${appA.id}`, method: "GET", query: verifyQuery(appA.verifyToken) })).statusCode, 403);
+  const body = JSON.stringify(statusPayload(appA, "updated-status"));
+  assert.equal((await h.webhook({ route: `/${appA.id}`, body, signingSecret: "updated-app-secret" })).statusCode, 200);
+  assert.equal((await h.webhook({ route: `/${appA.id}`, body, signingSecret: appA.secret })).statusCode, 401);
+
+  await h.connect(request);
+  assert.equal(h.documents.get(appPath).appSecretVersion, `${canonicalPrefix}golden-whatsapp-app-${appA.id}-secret/versions/3`);
+});
+
+test("novo número do mesmo app usa IDs informados, inclusive na segunda página da WABA", async () => {
+  const h = createHarness();
+  const newPhoneId = "5000002";
+  h.graphPages.set(`${appA.wabaId}:`, {
+    data: [{ id: appA.phoneNumberId, display_phone_number: "Número antigo" }],
+    paging: { next: "https://graph.facebook.com/next", cursors: { after: "cursor+2" } }
+  });
+  h.graphPages.set(`${appA.wabaId}:cursor+2`, {
+    data: [{ id: newPhoneId, display_phone_number: "Número novo", verified_name: "Nome novo" }]
+  });
+  const result = await h.connect(connectRequest(appA, { phoneNumberId: newPhoneId }));
+
+  assert.equal(result.number.phoneNumberId, newPhoneId);
+  assert.equal(result.number.wabaId, appA.wabaId);
+  assert.equal(result.number.displayPhoneNumber, "Número novo");
+  assert.equal(h.documents.get(`whatsappNumbers/${newPhoneId}`).wabaId, appA.wabaId);
+  assert.equal(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`).wabaId, appA.wabaId);
+  assert.equal(h.graphCalls[1].after, "cursor+2");
+  assert.equal(h.graphCalls[2].path, `/v25.0/${appA.wabaId}/subscribed_apps`);
+});
+
+test("cadastro rejeita número fora da WABA antes de assinar ou salvar credenciais", async () => {
+  const h = createHarness();
+  await assert.rejects(h.connect(connectRequest(appA, { phoneNumberId: "5000003" })),
+    (error) => error.code === "failed-precondition" && /não pertence à WABA/.test(error.message));
+  assert.equal(h.graphCalls.length, 1);
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.documents.has("whatsappNumbers/5000003"), false);
+});
+
+test("cadastro rejeita paginação inválida sem gravar credenciais", async () => {
+  const h = createHarness();
+  h.graphPages.set(`${appA.wabaId}:`, { data: [], paging: { next: "next", cursors: {} } });
+  await assert.rejects(h.connect(connectRequest(appA)),
+    (error) => error.code === "failed-precondition" && /paginação/.test(error.message));
+  assert.equal(h.calls.length, 0);
+});
+
+test("cadastro aproveita secret existente sem documento do app e cria secrets ausentes", async () => {
+  const h = createHarness();
+  const app = { id: "4000001", phoneNumberId: "5000001", wabaId: "6000001", secret: "new-app-secret", verifyToken: "new-verify-token" };
+  const existing = `${secretPrefix}golden-whatsapp-app-${app.id}-secret`;
+  h.secretResources.add(existing);
+  h.secrets.set(`${existing}/versions/1`, "old-app-secret");
+
+  await h.connect(connectRequest(app));
+  const saved = h.documents.get(`whatsappNumbers/_apps/apps/${app.id}`);
+  assert.equal(saved.appSecretVersion, `${canonicalPrefix}golden-whatsapp-app-${app.id}-secret/versions/2`);
+  assert.equal(saved.verifyTokenVersion, `${canonicalPrefix}golden-whatsapp-app-${app.id}-verify-token/versions/1`);
+  assert.equal(h.calls.some((call) => call.operation === "create" && call.name === existing), false);
+  assert.equal(h.calls.some((call) => call.operation === "create" && call.name.endsWith(`app-${app.id}-verify-token`)), true);
+  assert.equal(h.documents.get(`whatsappNumbers/${app.phoneNumberId}`).appId, app.id);
+});
+
+test("falha ao salvar token preserva versões ativas e registra código e detalhes sem credenciais", async () => {
+  const h = createHarness();
+  const appPath = `whatsappNumbers/_apps/apps/${appA.id}`;
+  const previous = h.documents.get(appPath);
+  const request = connectRequest(appA, {
+    appSecret: "updated-app-secret",
+    verifyToken: "updated-verify-token"
+  });
+  const failure = Object.assign(new Error(`Permission denied: ${request.data.appSecret}`), {
+    code: 7,
+    details: `Token ${request.data.accessToken}, verificação ${request.data.verifyToken}`
+  });
+  h.failures.addSecretVersion = (parent) => parent.endsWith(`token-${appA.phoneNumberId}`) ? failure : null;
+
+  await assert.rejects(h.connect(request), (error) => error.code === "failed-precondition");
+  assert.equal(h.documents.get(appPath).appSecretVersion, previous.appSecretVersion);
+  assert.equal(h.documents.get(appPath).verifyTokenVersion, previous.verifyTokenVersion);
+  const logged = JSON.stringify(h.errors);
+  assert.match(logged, /Permission denied/);
+  assert.match(logged, /"code":"7"/);
+  assert.match(logged, /REDACTED/);
+  for (const credential of [request.data.accessToken, request.data.appSecret, request.data.verifyToken]) {
+    assert.equal(logged.includes(credential), false);
+  }
 });
