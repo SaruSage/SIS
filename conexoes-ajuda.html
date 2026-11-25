@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Guia prático para configurar conexões, mensagens automáticas e agendamentos do WhatsApp Business no Projeto Golden.">
+  <title>Guia do WhatsApp — Projeto Golden</title>
+  <script>
+    (function () {
+      function aplicarPreferencias() {
+        var tema = localStorage.getItem("golden-tema") === "escuro" ? "escuro" : "claro";
+        var fonteSalva = localStorage.getItem("golden-fonte") || "normal";
+        var fonte = ["pequena", "normal", "grande"].indexOf(fonteSalva) >= 0 ? fonteSalva : "normal";
+        [document.documentElement, document.body].filter(Boolean).forEach(function (elemento) {
+          elemento.classList.remove("tema-claro", "tema-escuro", "fonte-pequena", "fonte-normal", "fonte-grande");
+          elemento.classList.add("tema-" + tema, "fonte-" + fonte);
+        });
+      }
+      aplicarPreferencias();
+      window.addEventListener("storage", function (evento) {
+        if (evento.key === "golden-tema" || evento.key === "golden-fonte") aplicarPreferencias();
+      });
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,400;6..144,600;6..144,700&family=Hind+Guntur:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/layout-base.css">
+  <link rel="stylesheet" href="css/conexoes.css">
+  <link rel="stylesheet" href="css/conexoes-ajuda.css">
+</head>
+<body>
+  <script>document.body.className = document.documentElement.className;</script>
+  <main class="app-conteudo ajuda-conteudo">
+    <a class="ajuda-voltar" href="conexoes.html">← Voltar para Conexões</a>
+
+    <header class="ajuda-hero">
+      <p class="ajuda-sobretitulo">GUIA PRÁTICO · WHATSAPP BUSINESS</p>
+      <h1>Configure sua conexão e automatize o atendimento</h1>
+      <p class="ajuda-introducao">Siga este guia para vincular um número, testar a comunicação e configurar respostas e direcionamentos no Kanban.</p>
+      <div class="ajuda-alerta ajuda-alerta-info" role="note">
+        <strong>Importante:</strong> “Verificar comunicação” confirma que a plataforma consegue consultar o número na Meta. Essa verificação não envia uma mensagem e não garante que uma mensagem real será entregue ao destinatário.
+      </div>
+    </header>
+
+    <nav class="ajuda-indice" aria-label="Nesta página">
+      <strong>Neste guia</strong>
+      <a href="#preparacao">Antes de começar</a>
+      <a href="#cadastro">Cadastrar e testar o número</a>
+      <a href="#mensagens">Criar mensagens automáticas</a>
+      <a href="#kanban">Direcionamentos e agendamentos</a>
+      <a href="#solucao-problemas">Se algo não funcionar</a>
+    </nav>
+
+    <section class="ajuda-secao" id="preparacao">
+      <div class="ajuda-secao-titulo">
+        <span class="ajuda-numero">00</span>
+        <div>
+          <p class="ajuda-etiqueta">PREPARAÇÃO</p>
+          <h2>Antes de começar</h2>
+        </div>
+      </div>
+      <div class="ajuda-cartao">
+        <p>Tenha acesso de administrador ao app Meta que contém o produto WhatsApp e à conta do WhatsApp Business (WABA). Separe estes dados do mesmo app e do mesmo número:</p>
+        <ul class="ajuda-lista">
+          <li><strong>Phone Number ID</strong> e <strong>WABA ID</strong> — identificadores da Meta, não são o telefone que os clientes discam.</li>
+          <li><strong>App ID</strong> e <strong>App Secret</strong> — dados do app Meta.</li>
+          <li><strong>Token de acesso permanente</strong> do System User com acesso ao app, à WABA e ao número.</li>
+          <li><strong>Token de verificação do webhook</strong> — crie uma frase aleatória com pelo menos 8 caracteres; ela não é emitida pela Meta.</li>
+        </ul>
+        <p class="ajuda-nota">Para atender clientes fora do ambiente de teste, confirme também que o app e o número estão configurados para produção e publicados conforme as exigências da Meta.</p>
+      </div>
+    </section>
+
+    <section class="ajuda-secao" id="cadastro">
+      <div class="ajuda-secao-titulo">
+        <span class="ajuda-numero">01</span>
+        <div>
+          <p class="ajuda-etiqueta">CONEXÃO E WEBHOOK</p>
+          <h2>Cadastrar e testar o número</h2>
+        </div>
+      </div>
+
+      <ol class="ajuda-passos">
+        <li class="ajuda-cartao">
+          <span class="ajuda-passo-numero">1</span>
+          <div>
+            <h3>Crie um card de conexão</h3>
+            <p>Na página <strong>Conexões</strong>, clique no botão <strong>+</strong> ao lado de “CONEXÕES DE WHATSAPP”. Abra o card e, em <strong>CADASTRO DE CONTATO</strong>, informe:</p>
+            <ul class="ajuda-lista">
+              <li><strong>Número vinculado:</strong> é preenchido pela Meta depois da validação.</li>
+              <li><strong>Phone Number ID</strong>, <strong>WhatsApp Business Account ID (WABA ID)</strong> e <strong>App ID</strong>.</li>
+              <li><strong>Token de acesso permanente</strong>, <strong>Token de verificação do webhook</strong> e <strong>App Secret</strong>.</li>
+            </ul>
+            <p>O nome maior do card pode ser alterado com duplo clique enquanto ele estiver aberto. Os IDs do número já vinculado são somente leitura; para conectar outro número, crie outro card.</p>
+            <p>Confira se os três IDs pertencem ao mesmo número, WABA e app. O vínculo pode registrar o app na WABA; se a Meta recusar o acesso, revise as permissões do token.</p>
+          </div>
+        </li>
+        <li class="ajuda-cartao">
+          <span class="ajuda-passo-numero">2</span>
+          <div>
+            <h3>Proteja as credenciais</h3>
+            <p>Ao salvar, o backend guarda o token de acesso por número e o App Secret e token de verificação por app no <strong>Google Cloud Secret Manager</strong>. Os segredos salvos não voltam a ser exibidos no formulário. Para atualizá-los, informe novamente as três credenciais.</p>
+            <p class="ajuda-nota">O App Secret e o token de verificação são compartilhados pelos números do mesmo app. Ao trocá-los, atualize também a configuração do webhook na Meta. Não compartilhe tokens ou segredos em mensagens, capturas de tela ou chamados.</p>
+          </div>
+        </li>
+        <li class="ajuda-cartao">
+          <span class="ajuda-passo-numero">3</span>
+          <div>
+            <h3>Configure o webhook na Meta</h3>
+            <p>Depois de informar o App ID, copie a <strong>URL do webhook deste app</strong> exibida no card. No painel do app Meta, abra a configuração de Webhooks do produto WhatsApp e configure:</p>
+            <ul class="ajuda-lista">
+              <li><strong>Callback URL:</strong> cole a URL copiada do card. Ela já contém o App ID.</li>
+              <li><strong>Verify token:</strong> use exatamente o token de verificação informado no cadastro.</li>
+              <li><strong>Campo de evento:</strong> assine <code>messages</code> para receber mensagens e atualizações relacionadas.</li>
+            </ul>
+            <p>A Meta valida o callback usando o token de verificação. A assinatura dos eventos recebidos é verificada no backend com o App Secret. Não acrescente nem remova o trecho do App ID da URL.</p>
+          </div>
+        </li>
+        <li class="ajuda-cartao">
+          <span class="ajuda-passo-numero">4</span>
+          <div>
+            <h3>Ative o número e a captação</h3>
+            <p>O controle <strong>ATIVADO / DESATIVADO</strong> define se o número pode ser usado pela plataforma. Dentro de <strong>CADASTRO DE CONTATO</strong>, o botão <strong>Ativar captação</strong> controla separadamente se o webhook processa mensagens recebidas. Para receber e automatizar conversas, deixe ambos ativos.</p>
+            <p>Desativar a captação interrompe o processamento de entradas; desativar o número também impede ações e envios agendados por esse número.</p>
+          </div>
+        </li>
+        <li class="ajuda-cartao">
+          <span class="ajuda-passo-numero">5</span>
+          <div>
+            <h3>Verifique a comunicação</h3>
+            <p>Clique em <strong>Verificar comunicação</strong>. A plataforma consulta a Meta e compara o ID retornado com o Phone Number ID cadastrado. Um resultado operacional confirma essa consulta, mas <strong>não comprova entrega de mensagens</strong>, recebimento pelo cliente nem configuração completa do webhook.</p>
+            <p>Para testar o fluxo real, envie uma mensagem a partir de um contato de teste autorizado ou peça ao cliente para iniciar uma conversa. Confirme que a entrada aparece no Kanban. Para iniciar uma conversa pela equipe, use um modelo aprovado pela Meta.</p>
+            <ul class="ajuda-lista">
+              <li><strong>Verde · OPERANDO:</strong> conexão funcional e número ativado.</li>
+              <li><strong>Amarelo · OPERANDO:</strong> conexão funcional, mas número desativado; reative-o para uso.</li>
+              <li><strong>Vermelho · NÃO OPERANTE:</strong> falha de comunicação com o WhatsApp, mesmo se o número estiver ativado.</li>
+            </ul>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="ajuda-secao" id="mensagens">
+      <div class="ajuda-secao-titulo">
+        <span class="ajuda-numero">02</span>
+        <div>
+          <p class="ajuda-etiqueta">RESPOSTAS AUTOMÁTICAS</p>
+          <h2>Criar e gerenciar mensagens</h2>
+        </div>
+      </div>
+      <div class="ajuda-cartao">
+        <ol class="ajuda-lista-ordenada">
+          <li>Abra o card do número com duplo clique ou pelo botão <strong>⋮</strong>. Expanda <strong>AUTOMAÇÃO DE CONTATO</strong> e clique em <strong>CRIAR MENSAGEM</strong>.</li>
+          <li>Dê um nome e monte a mensagem usando até <strong>20 blocos</strong>. É necessário haver conteúdo visível para enviar.</li>
+          <li>Clique em <strong>Salvar</strong>. No card da mensagem, confira a pré-visualização e as colunas relacionadas. Use <strong>EDITAR</strong> para alterar os blocos.</li>
+          <li>Ative a mensagem desejada. Pode haver <strong>somente uma mensagem ativa por número</strong>; ativar outra suspende a anterior. Mensagens inativas não respondem nem direcionam opções.</li>
+        </ol>
+      </div>
+
+      <div class="ajuda-blocos">
+        <article class="ajuda-cartao ajuda-bloco">
+          <span class="ajuda-bloco-icone">T</span>
+          <h3>+TEXTO</h3>
+          <p>Texto livre que aparece na mensagem enviada ao cliente. Pode incluir várias linhas, símbolos e emojis.</p>
+        </article>
+        <article class="ajuda-cartao ajuda-bloco">
+          <span class="ajuda-bloco-icone">1</span>
+          <h3>+OPÇÃO SIMPLES</h3>
+          <p>O <strong>gatilho</strong> é a resposta que o cliente digitar (de 1 a 15 caracteres). A descrição é opcional e aparece junto da opção. <strong>Negritar</strong> envolve o rótulo em asteriscos; <strong>Estilizar</strong> troca o texto exibido, sem trocar o gatilho reconhecido.</p>
+          <p>Escolha também a coluna de destino. Exemplo: o cliente responde <code>1</code> e a conversa vai para <code>Entrada vendas*</code>.</p>
+        </article>
+        <article class="ajuda-cartao ajuda-bloco">
+          <span class="ajuda-bloco-icone">⋯</span>
+          <h3>+OPÇÃO OCULTA</h3>
+          <p>Define um gatilho e uma coluna de destino, mas <strong>não aparece no texto enviado</strong>. A descrição serve como anotação interna. Use-a para tratar palavras-chave ou respostas que não quer listar ao cliente.</p>
+        </article>
+      </div>
+
+      <div class="ajuda-alerta ajuda-alerta-info">
+        <h3>Como funciona o controle de 24 horas?</h3>
+        <p>Com <strong>“ENVIAR SOMENTE QUANDO O CONTATO FOR INICIADO PELO DESTINATÁRIO” marcado</strong> (padrão), a automação responde quando o cliente inicia a conversa ou volta após pelo menos 24 horas sem atividade do cliente <em>e</em> da equipe. Se a equipe respondeu recentemente, uma resposta do cliente dentro desse período não dispara outra mensagem automática.</p>
+        <p>Desmarcado, a automação pode responder à primeira interação recebida mesmo que a equipe tenha iniciado a conversa, mas limita novos envios automáticos a um por intervalo de 24 horas. A janela de atendimento da Meta continua valendo: mensagens livres só podem ser enviadas dentro da janela aberta pela interação do cliente; para iniciar uma conversa, use um modelo aprovado.</p>
+      </div>
+    </section>
+
+    <section class="ajuda-secao" id="kanban">
+      <div class="ajuda-secao-titulo">
+        <span class="ajuda-numero">03</span>
+        <div>
+          <p class="ajuda-etiqueta">KANBAN E AGENDAMENTOS</p>
+          <h2>Direcione conversas e programe envios</h2>
+        </div>
+      </div>
+      <div class="ajuda-cartao">
+        <h3>Use o asterisco para habilitar uma coluna</h3>
+        <p>Para que uma coluna apareça como destino de uma opção, o nome do documento correspondente na coleção Firestore <code>colunas</code> precisa terminar exatamente com <code>*</code>.</p>
+        <div class="ajuda-exemplos">
+          <p><span class="ajuda-exemplo-ok">Elegível</span> <code>Entrada vendas*</code></p>
+          <p><span class="ajuda-exemplo-nao">Não elegível</span> <code>*Entrada vendas</code> ou <code>Entrada vendas</code></p>
+        </div>
+        <p>Escolha essa coluna no campo <strong>Direcionamento</strong> do bloco. Quando chegar uma resposta que corresponda exatamente ao gatilho (ignorando espaços nas pontas e diferenças entre maiúsculas/minúsculas), o sistema cria ou move o card da conversa para ela e registra a movimentação no histórico das colunas. Opções simples e ocultas podem direcionar.</p>
+        <p>Se a coluna for removida ou renomeada sem o asterisco final, o backend deixa de aceitá-la como destino. Restaure o sufixo <code>*</code> e confira novamente a automação antes de testar.</p>
+      </div>
+
+      <div class="ajuda-cartao ajuda-cartao-agendamento">
+        <h3>Agendamentos no Kanban</h3>
+        <p>Use a programação do próprio card para agendar um envio individual. Colunas do tipo <strong>Funcionária</strong> também podem ter regras de envio automático para os cards que passam por elas. O texto livre precisa respeitar a janela de atendimento da Meta; fora dela, use um modelo aprovado.</p>
+        <div class="ajuda-alerta ajuda-alerta-atencao" role="note">
+          <strong>Se o número estiver desativado na hora marcada:</strong> o envio não é realizado. O job é marcado como falha; no agendamento do card, o status passa para <strong>Falha</strong>. Reativar o número depois não reenvia automaticamente aquele job: reative o número e programe o envio novamente. Desativar a captação, por si só, não equivale a desativar os envios agendados.
+        </div>
+      </div>
+    </section>
+
+    <section class="ajuda-secao" id="solucao-problemas">
+      <div class="ajuda-secao-titulo">
+        <span class="ajuda-numero">04</span>
+        <div>
+          <p class="ajuda-etiqueta">CONSULTA RÁPIDA</p>
+          <h2>Se algo não funcionar</h2>
+        </div>
+      </div>
+      <div class="ajuda-cartao">
+        <ul class="ajuda-lista ajuda-diagnostico">
+          <li><strong>Número não vincula:</strong> confirme que Phone Number ID, WABA ID, App ID e token pertencem ao mesmo conjunto e que o token tem acesso ao número.</li>
+          <li><strong>Webhook não recebe mensagens:</strong> revise a callback URL copiada do card, o token de verificação, a assinatura de <code>messages</code>, o App Secret e se a captação está ativa.</li>
+          <li><strong>Não há resposta automática:</strong> confirme que o número está ativado, que há exatamente uma mensagem ativa, que a captação está ativa e que a regra de 24 horas permite o envio.</li>
+          <li><strong>Opção não direciona:</strong> compare a resposta com o gatilho e confirme que a coluna ainda existe e termina com <code>*</code>.</li>
+          <li><strong>Verificação funciona, mas não chega mensagem:</strong> essa verificação só consulta a Meta. Teste o envio real, confira a janela de atendimento e, quando necessário, use um modelo aprovado.</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="ajuda-rodape">
+      <p>Precisa voltar à configuração? <a href="conexoes.html">Abra a página Conexões</a> e consulte o card do número.</p>
+    </footer>
+  </main>
+</body>
+</html>

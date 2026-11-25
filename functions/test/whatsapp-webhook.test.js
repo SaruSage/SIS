@@ -8,6 +8,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+const whatsappAutomation = require(path.join(__dirname, "..", "whatsapp-automation.js"));
 const project = "webhook-test";
 const projectNumber = "123456789012";
 const secretPrefix = `projects/${project}/secrets/`;
@@ -35,13 +36,23 @@ function createHarness() {
   const secrets = new Map();
   const secretResources = new Set();
   const errors = [];
+  const warnings = [];
   const calls = [];
   const failures = {};
   const graphCalls = [];
+  let nextId = 0;
+  let transactionTail = Promise.resolve();
+  const timestamp = (millis) => ({ toMillis: () => millis, toDate: () => new Date(millis) });
   const graphPages = new Map([
-    [`${appA.wabaId}:`, { data: [{ id: appA.phoneNumberId, display_phone_number: "Número A", verified_name: "Teste A" }] }],
-    [`${appB.wabaId}:`, { data: [{ id: appB.phoneNumberId, display_phone_number: "Número B", verified_name: "Teste B" }] }],
-    ["6000001:", { data: [{ id: "5000001", display_phone_number: "Número novo", verified_name: "Teste novo" }] }]
+    [`${appA.wabaId}:`, { data: [{ id: appA.phoneNumberId }] }],
+    [`${appB.wabaId}:`, { data: [{ id: appB.phoneNumberId }] }],
+    ["6000001:", { data: [{ id: "5000001" }] }]
+  ]);
+  const graphNumbers = new Map([
+    [appA.phoneNumberId, { id: appA.phoneNumberId, display_phone_number: "Número A", verified_name: "Teste A" }],
+    [appB.phoneNumberId, { id: appB.phoneNumberId, display_phone_number: "Número B", verified_name: "Teste B" }],
+    ["5000001", { id: "5000001", display_phone_number: "Número novo", verified_name: "Teste novo" }],
+    ["849591261693565", { id: "849591261693565", display_phone_number: "Número novo", verified_name: "Nome novo" }]
   ]);
 
   function documentRef(documentPath) {
@@ -55,6 +66,7 @@ function createHarness() {
           : { ...data });
       },
       update: async (data) => {
+        if (failures.update) failures.update(documentPath, data);
         if (!documents.has(documentPath)) throw new Error(`Documento ausente: ${documentPath}`);
         documents.set(documentPath, { ...documents.get(documentPath), ...data });
       }
@@ -71,19 +83,34 @@ function createHarness() {
     };
   }
 
-  function collection(collectionPath, filter) {
+  function collection(collectionPath, filter, ordering, maxCount) {
     return {
-      doc: (id) => documentRef(`${collectionPath}/${id}`),
+      doc: (id) => documentRef(`${collectionPath}/${id || `generated-${++nextId}`}`),
       where: (field, operator, value) => {
         assert.equal(operator, "==");
-        return collection(collectionPath, { field, value });
+        return collection(collectionPath, { field, value }, ordering, maxCount);
       },
+      orderBy: (field, direction = "asc") =>
+        collection(collectionPath, filter, { field, direction }, maxCount),
+      limit: (count) => collection(collectionPath, filter, ordering, count),
       get: async () => {
         const prefix = `${collectionPath}/`;
-        const docs = [...documents.keys()]
+        let docs = [...documents.keys()]
           .filter((key) => key.startsWith(prefix) && !key.slice(prefix.length).includes("/"))
           .filter((key) => !filter || documents.get(key)[filter.field] === filter.value)
           .map(snapshot);
+        if (ordering) {
+          docs.sort((a, b) => {
+            const left = a.data()[ordering.field] && a.data()[ordering.field].toMillis
+              ? a.data()[ordering.field].toMillis()
+              : 0;
+            const right = b.data()[ordering.field] && b.data()[ordering.field].toMillis
+              ? b.data()[ordering.field].toMillis()
+              : 0;
+            return (ordering.direction === "desc" ? right - left : left - right);
+          });
+        }
+        if (maxCount !== undefined) docs = docs.slice(0, maxCount);
         return { docs, empty: docs.length === 0 };
       }
     };
@@ -91,11 +118,24 @@ function createHarness() {
 
   const db = {
     collection,
-    runTransaction: async (callback) => callback({
-      get: (ref) => ref.get(),
-      set: (ref, data, options) => ref.set(data, options),
-      update: (ref, data) => ref.update(data)
-    })
+    runTransaction: async (callback) => {
+      const previous = transactionTail;
+      let release;
+      transactionTail = new Promise((resolve) => { release = resolve; });
+      await previous;
+      try {
+        const writes = [];
+        const result = await callback({
+          get: (ref) => ref.get(),
+          set: (ref, data, options) => writes.push(() => ref.set(data, options)),
+          update: (ref, data) => writes.push(() => ref.update(data))
+        });
+        for (const write of writes) await write();
+        return result;
+      } finally {
+        release();
+      }
+    }
   };
 
   class SecretManagerServiceClient {
@@ -140,6 +180,8 @@ function createHarness() {
     switch (name) {
       case "node:crypto":
         return crypto;
+      case "./whatsapp-automation":
+        return whatsappAutomation;
       case "@google-cloud/secret-manager":
         return { SecretManagerServiceClient };
       case "firebase-admin/app":
@@ -147,8 +189,8 @@ function createHarness() {
       case "firebase-admin/firestore":
         return {
           getFirestore: () => db,
-          FieldValue: { serverTimestamp: () => "server-timestamp" },
-          Timestamp: { fromDate: (date) => date }
+          FieldValue: { serverTimestamp: () => timestamp(Date.now()), delete: () => null },
+          Timestamp: { fromDate: (date) => timestamp(date.getTime()), fromMillis: timestamp }
         };
       case "firebase-functions/v2/https":
         return {
@@ -174,16 +216,27 @@ function createHarness() {
     AbortSignal,
     fetch: async (url, options) => {
       const parsed = new URL(url);
-      graphCalls.push({ path: parsed.pathname, after: parsed.searchParams.get("after"), method: options.method || "GET" });
+      graphCalls.push({
+        path: parsed.pathname,
+        after: parsed.searchParams.get("after"),
+        fields: parsed.searchParams.get("fields"),
+        method: options.method || "GET",
+        payload: options.body ? JSON.parse(options.body) : null
+      });
+      if (failures.fetch) await failures.fetch(parsed, options);
       const wabaId = parsed.pathname.split("/")[2];
-      const body = parsed.pathname.endsWith("/phone_numbers")
+      const body = parsed.pathname.endsWith("/messages")
+        ? { messages: [{ id: "wamid-outgoing" }] }
+        : parsed.pathname.endsWith("/phone_numbers")
         ? graphPages.get(`${wabaId}:${parsed.searchParams.get("after") || ""}`)
-        : { success: true };
+        : parsed.pathname.endsWith("/subscribed_apps")
+          ? { success: true }
+          : graphNumbers.get(wabaId);
       return { ok: true, json: async () => body };
     },
     process: { env: { GCLOUD_PROJECT: project } },
     console: {
-      warn() {},
+      warn: (...args) => warnings.push(args),
       error: (...args) => errors.push(args)
     }
   }, { filename: "functions/index.js" });
@@ -245,7 +298,12 @@ function createHarness() {
     return response;
   }
 
-  return { documents, secrets, secretResources, errors, calls, failures, graphCalls, graphPages, webhook, connect: exports.connectWhatsAppNumber };
+  return {
+    documents, secrets, secretResources, errors, warnings, calls, failures, graphCalls, graphPages, graphNumbers,
+    webhook, connect: exports.connectWhatsAppNumber,
+    updateNumber: exports.updateWhatsAppNumber, checkNumber: exports.checkWhatsAppNumberStatus,
+    saveAutomation: exports.saveWhatsAppAutomation
+  };
 }
 
 function messagePayload(app, messageId, wabaId = app.wabaId, phoneNumberId = app.phoneNumberId) {
@@ -270,6 +328,14 @@ function messagePayload(app, messageId, wabaId = app.wabaId, phoneNumberId = app
   };
 }
 
+function incomingBody(app, messageId, text, timestamp = Math.floor(Date.now() / 1000)) {
+  const payload = messagePayload(app, messageId);
+  const message = payload.entry[0].changes[0].value.messages[0];
+  message.timestamp = String(timestamp);
+  message.text.body = text;
+  return JSON.stringify(payload);
+}
+
 function statusPayload(app, messageId, wabaId = app.wabaId, phoneNumberId = app.phoneNumberId) {
   return {
     entry: [{
@@ -288,6 +354,43 @@ function statusPayload(app, messageId, wabaId = app.wabaId, phoneNumberId = app.
 function verifyQuery(token, mode = "subscribe") {
   return { "hub.mode": mode, "hub.verify_token": token, "hub.challenge": "test-challenge" };
 }
+
+test("regras de 24 horas incluem atividade da equipe e normalizam opções", () => {
+  const at = 2_000_000_000_000;
+  assert.equal(whatsappAutomation.shouldSendAutomaticReply({
+    receivedAt: at,
+    lastInboundAt: at - 24 * 60 * 60 * 1000
+  }), true);
+  assert.equal(whatsappAutomation.shouldSendAutomaticReply({
+    receivedAt: at,
+    lastOutboundAt: at - 24 * 60 * 60 * 1000 + 1
+  }), false);
+  assert.equal(whatsappAutomation.shouldSendAutomaticReply({
+    onlyRecipientInitiated: false,
+    receivedAt: at
+  }), true);
+  assert.equal(whatsappAutomation.shouldSendAutomaticReply({
+    onlyRecipientInitiated: false,
+    receivedAt: at,
+    lastAutomaticReplyAt: at - 24 * 60 * 60 * 1000
+  }), true);
+  assert.equal(whatsappAutomation.shouldSendAutomaticReply({
+    onlyRecipientInitiated: false,
+    receivedAt: at,
+    lastAutomaticReplyAt: at - 1
+  }), false);
+  const active = { blocks: [
+    { type: "option", trigger: " 1 ", columnId: "sales" },
+    { type: "hidden", trigger: "interno", columnId: "finance" }
+  ] };
+  assert.deepEqual(whatsappAutomation.findMatchingOption(active, " 1 "), {
+    columnId: "sales", trigger: " 1 "
+  });
+  assert.deepEqual(whatsappAutomation.findMatchingOption(active, "INTERNO"), {
+    columnId: "finance", trigger: "interno"
+  });
+  assert.equal(whatsappAutomation.findMatchingOption(active, "10"), null);
+});
 
 test("GET valida o verifyToken próprio de cada aplicativo", async () => {
   const h = createHarness();
@@ -322,6 +425,278 @@ test("POST aceita HMAC do corpo bruto e grava mensagens dos dois aplicativos", a
     assert.equal(h.documents.get(`whatsappWebhookEvents/${id}`).processed, true);
   }
   assert.equal(h.errors.length, 0);
+});
+
+test("evento concorrente aguarda nova tentativa e não duplica card, histórico ou resposta", { timeout: 5000 }, async () => {
+  const h = createHarness();
+  h.documents.delete(`cards/${appA.cardId}`);
+  h.documents.set("colunas/entrada", { nome: "Entrada", ordem: 0 });
+  Object.assign(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`), {
+    preAtendimentoEnabled: true, preAtendimentoMessage: "Olá"
+  });
+  h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+  let release;
+  let entered;
+  const waiting = new Promise((resolve) => { release = resolve; });
+  const sending = new Promise((resolve) => { entered = resolve; });
+  h.failures.fetch = async (url) => {
+    if (url.pathname.endsWith("/messages")) {
+      entered();
+      await waiting;
+    }
+  };
+  const args = { route: `/${appA.id}`, body: JSON.stringify(messagePayload(appA, "wamid-concurrent")), signingSecret: appA.secret };
+  const first = h.webhook(args);
+  try {
+    await sending;
+    assert.equal((await h.webhook(args)).statusCode, 500);
+  } finally {
+    release();
+  }
+  assert.equal((await first).statusCode, 200);
+  assert.equal((await h.webhook(args)).statusCode, 200);
+  const cards = [...h.documents.keys()].filter((key) => /^cards\/[^/]+$/.test(key) && key !== `cards/${appB.cardId}`);
+  assert.equal(cards.length, 1);
+  assert.equal([...h.documents.keys()].filter((key) => key.startsWith("colunas/entrada/historico/")).length, 1);
+  assert.equal(h.graphCalls.filter((call) => call.path.endsWith("/messages")).length, 1);
+  assert.equal(h.documents.get("whatsappWebhookEvents/wamid-concurrent").state, "completed");
+});
+
+test("falha antes da criação libera a trava para nova tentativa", async () => {
+  const h = createHarness();
+  h.documents.delete(`cards/${appA.cardId}`);
+  const args = { route: `/${appA.id}`, body: JSON.stringify(messagePayload(appA, "wamid-retry")), signingSecret: appA.secret };
+  assert.equal((await h.webhook(args)).statusCode, 500);
+  assert.equal(h.documents.get("whatsappWebhookEvents/wamid-retry").state, "failed");
+  h.documents.set("colunas/entrada", { nome: "Entrada", ordem: 0 });
+  assert.equal((await h.webhook(args)).statusCode, 200);
+  assert.equal([...h.documents.keys()].filter((key) => key.startsWith("colunas/entrada/historico/")).length, 1);
+});
+
+test("falha após tentativa de envio não repete o envio ou cria outro card", async () => {
+  const h = createHarness();
+  h.documents.delete(`cards/${appA.cardId}`);
+  h.documents.set("colunas/entrada", { nome: "Entrada", ordem: 0 });
+  Object.assign(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`), {
+    preAtendimentoEnabled: true, preAtendimentoMessage: "Olá"
+  });
+  h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+  h.failures.update = (path, data) => {
+    if (path.startsWith("cards/") && ("botRespostaApiId" in data || "botRespostaErro" in data)) {
+      throw new Error("Falha simulada após envio");
+    }
+  };
+  const args = { route: `/${appA.id}`, body: JSON.stringify(messagePayload(appA, "wamid-ambiguous")), signingSecret: appA.secret };
+  assert.equal((await h.webhook(args)).statusCode, 500);
+  const event = h.documents.get("whatsappWebhookEvents/wamid-ambiguous");
+  assert.equal(event.state, "failed");
+  assert.equal(event.replyAttempted, true);
+  const cardId = event.cardId;
+  delete h.failures.update;
+  assert.equal((await h.webhook(args)).statusCode, 200);
+  assert.equal(h.documents.get("whatsappWebhookEvents/wamid-ambiguous").cardId, cardId);
+  assert.equal(h.graphCalls.filter((call) => call.path.endsWith("/messages")).length, 1);
+  assert.equal([...h.documents.keys()].filter((key) => key.startsWith("colunas/entrada/historico/")).length, 1);
+});
+
+test("resposta da Meta perdida é registrada e o evento não reenvia", async () => {
+  const h = createHarness();
+  Object.assign(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`), {
+    preAtendimentoEnabled: true, preAtendimentoMessage: "Olá"
+  });
+  h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+  h.failures.fetch = async (url) => {
+    if (url.pathname.endsWith("/messages")) throw new Error("Conexão encerrada");
+  };
+  const args = { route: `/${appA.id}`, body: JSON.stringify(messagePayload(appA, "wamid-network")), signingSecret: appA.secret };
+  assert.equal((await h.webhook(args)).statusCode, 200);
+  assert.equal((await h.webhook(args)).statusCode, 200);
+  assert.match(h.documents.get(`cards/${appA.cardId}`).botRespostaErro, /Conexão encerrada/);
+  assert.equal(h.graphCalls.filter((call) => call.path.endsWith("/messages")).length, 1);
+  assert.equal(h.documents.get("whatsappWebhookEvents/wamid-network").replyAttempted, true);
+});
+
+test("mensagem ativa dispara, grava a saída e direciona opção simples para coluna elegível", async () => {
+  const h = createHarness();
+  const numberPath = `whatsappNumbers/${appA.phoneNumberId}`;
+  const cardPath = `cards/${appA.cardId}`;
+  const now = Date.now();
+  h.documents.set("colunas/entrada", { nome: "Entrada", ordem: 0 });
+  h.documents.set("colunas/vendas", { nome: "Entrada vendas*", ordem: 1 });
+  Object.assign(h.documents.get(numberPath), {
+    botMessages: [{
+      id: "bot-vendas", name: "Boas-vindas", blocks: [
+        { type: "text", text: "Escolha uma opção:" },
+        { type: "option", trigger: "1", description: "Vendas", bold: true, styled: false, style: "", columnId: "vendas", columnName: "Entrada vendas*" }
+      ]
+    }],
+    activeBotMessageId: "bot-vendas",
+    onlyRecipientInitiated: true,
+    preAtendimentoEnabled: true,
+    preAtendimentoMessage: "Não deve substituir a mensagem ativa"
+  });
+  Object.assign(h.documents.get(cardPath), {
+    colunaId: "entrada",
+    lastInboundAt: new Date(now - 26 * 60 * 60 * 1000)
+  });
+  h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+  const response = await h.webhook({
+    route: `/${appA.id}`,
+    body: incomingBody(appA, "wamid-bot-route", " 1 "),
+    signingSecret: appA.secret
+  });
+
+  assert.equal(response.statusCode, 200);
+  const event = h.documents.get("whatsappWebhookEvents/wamid-bot-route");
+  const card = h.documents.get(`cards/${event.cardId}`);
+  assert.equal(card.colunaId, "vendas");
+  assert.equal(event.replyMode, "automation");
+  assert.equal(event.replyAttempted, true);
+  assert.equal(card.whatsappLastOutboundAt.toMillis() > now, true);
+  const sent = h.documents.get(`cards/${event.cardId}/mensagensWhatsapp/wamid-outgoing`);
+  assert.equal(sent.direction, "outgoing");
+  assert.equal(sent.text, "Escolha uma opção:\n*1* - Vendas");
+  assert.equal(h.graphCalls.filter((call) => call.path.endsWith("/messages"))[0].payload.text.body, sent.text);
+  assert.equal(h.documents.has(`colunas/vendas/historico/wamid-bot-route-route-in`), true);
+  assert.equal(h.documents.has(`colunas/entrada/historico/wamid-bot-route-route-out`), true);
+});
+
+test("atividade recente da equipe bloqueia mensagem ativa mesmo após inatividade do cliente", async () => {
+  const h = createHarness();
+  Object.assign(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`), {
+    botMessages: [{ id: "bot-1", name: "Bot", blocks: [{ type: "text", text: "Resposta" }] }],
+    activeBotMessageId: "bot-1",
+    onlyRecipientInitiated: true,
+    preAtendimentoEnabled: true,
+    preAtendimentoMessage: "Fallback não deve substituir a mensagem ativa"
+  });
+  Object.assign(h.documents.get(`cards/${appA.cardId}`), {
+    lastInboundAt: new Date(Date.now() - 48 * 60 * 60 * 1000),
+    whatsappLastOutboundAt: new Date(Date.now() - 60 * 60 * 1000)
+  });
+  const response = await h.webhook({
+    route: `/${appA.id}`,
+    body: incomingBody(appA, "wamid-team-activity", "Oi"),
+    signingSecret: appA.secret
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(h.graphCalls.filter((call) => call.path.endsWith("/messages")).length, 0);
+  assert.equal(h.documents.get("whatsappWebhookEvents/wamid-team-activity").replyAttempted, false);
+});
+
+test("atividade de saída legada é recuperada do histórico de mensagens", async () => {
+  const h = createHarness();
+  const lastTeamMessage = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  Object.assign(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`), {
+    botMessages: [{ id: "bot-1", name: "Bot", blocks: [{ type: "text", text: "Resposta" }] }],
+    activeBotMessageId: "bot-1",
+    onlyRecipientInitiated: true
+  });
+  Object.assign(h.documents.get(`cards/${appA.cardId}`), {
+    lastInboundAt: new Date(Date.now() - 48 * 60 * 60 * 1000)
+  });
+  h.documents.set(`cards/${appA.cardId}/mensagensWhatsapp/legacy-out`, {
+    direction: "outgoing",
+    criadoEm: lastTeamMessage
+  });
+  const response = await h.webhook({
+    route: `/${appA.id}`,
+    body: incomingBody(appA, "wamid-legacy-activity", "Oi"),
+    signingSecret: appA.secret
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(h.graphCalls.filter((call) => call.path.endsWith("/messages")).length, 0);
+  assert.equal(
+    h.documents.get(`cards/${appA.cardId}`).whatsappLastOutboundAt.getTime(),
+    lastTeamMessage.getTime()
+  );
+});
+
+test("backend ignora direcionamento se a coluna deixou de terminar em asterisco", async () => {
+  const h = createHarness();
+  h.documents.set("colunas/entrada", { nome: "Entrada", ordem: 0 });
+  h.documents.set("colunas/vendas", { nome: "Entrada vendas", ordem: 1 });
+  Object.assign(h.documents.get(`cards/${appA.cardId}`), { colunaId: "entrada" });
+  Object.assign(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`), {
+    botMessages: [{
+      id: "bot-vendas", name: "Bot", blocks: [
+        { type: "text", text: "Escolha" },
+        { type: "option", trigger: "1", description: "", bold: false, styled: false, style: "", columnId: "vendas", columnName: "Entrada vendas*" }
+      ]
+    }],
+    activeBotMessageId: "bot-vendas",
+    onlyRecipientInitiated: false
+  });
+  h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+  const response = await h.webhook({
+    route: `/${appA.id}`,
+    body: incomingBody(appA, "wamid-invalid-column", "1"),
+    signingSecret: appA.secret
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(h.documents.get(`cards/${appA.cardId}`).colunaId, "entrada");
+  assert.equal(h.documents.has("colunas/vendas/historico/wamid-invalid-column-route-in"), false);
+  assert.equal(h.warnings.some(([message]) => /Direcionamento do WhatsApp ignorado/.test(message)), true);
+});
+
+test("eventos concorrentes da mesma conversa criam um card e enviam no máximo uma resposta automática", async () => {
+  const h = createHarness();
+  h.documents.delete(`cards/${appA.cardId}`);
+  h.documents.set("colunas/entrada", { nome: "Entrada", ordem: 0 });
+  h.documents.set("colunas/vendas", { nome: "Entrada vendas*", ordem: 1 });
+  Object.assign(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`), {
+    botMessages: [{
+      id: "bot-1", name: "Bot", blocks: [
+        { type: "text", text: "Escolha:" },
+        { type: "hidden", trigger: "vendas", description: "", columnId: "vendas", columnName: "Entrada vendas*" }
+      ]
+    }],
+    activeBotMessageId: "bot-1",
+    onlyRecipientInitiated: false
+  });
+  h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+  const args = (id) => ({
+    route: `/${appA.id}`,
+    body: incomingBody(appA, id, "VENDAS"),
+    signingSecret: appA.secret
+  });
+  const [first, second] = await Promise.all([
+    h.webhook(args("wamid-same-contact-1")),
+    h.webhook(args("wamid-same-contact-2"))
+  ]);
+  assert.equal(first.statusCode, 200);
+  assert.equal(second.statusCode, 200);
+
+  const cards = [...h.documents.keys()].filter((key) =>
+    /^cards\/[^/]+$/.test(key) && key !== `cards/${appB.cardId}`
+  );
+  assert.equal(cards.length, 1);
+  const cardId = cards[0].slice("cards/".length);
+  assert.equal(h.documents.get(cards[0]).colunaId, "vendas");
+  assert.equal(h.graphCalls.filter((call) => call.path.endsWith("/messages")).length, 1);
+  assert.equal([...h.documents.keys()].filter((key) =>
+    key.startsWith(`${cards[0]}/mensagensWhatsapp/`) &&
+    h.documents.get(key).direction === "incoming"
+  ).length, 2);
+  assert.equal([...h.documents.keys()].filter((key) =>
+    key.startsWith(`colunas/vendas/historico/`) &&
+    h.documents.get(key).cardId === cardId
+  ).length, 1);
+});
+
+test("trava expirada é recuperada e evento legado concluído não é processado novamente", async () => {
+  const h = createHarness();
+  h.documents.set("whatsappWebhookEvents/wamid-expired", {
+    processed: false, state: "processing", lockOwner: "old",
+    lockExpiresAt: { toMillis: () => Date.now() - 1 }
+  });
+  const args = { route: `/${appA.id}`, body: JSON.stringify(messagePayload(appA, "wamid-expired")), signingSecret: appA.secret };
+  assert.equal((await h.webhook(args)).statusCode, 200);
+  assert.equal(h.documents.get("whatsappWebhookEvents/wamid-expired").state, "completed");
+  h.documents.set("whatsappWebhookEvents/wamid-legacy-done", { processed: true });
+  args.body = JSON.stringify(messagePayload(appA, "wamid-legacy-done"));
+  assert.equal((await h.webhook(args)).statusCode, 200);
+  assert.equal(h.documents.has(`cards/${appA.cardId}/mensagensWhatsapp/wamid-legacy-done`), false);
 });
 
 test("POST rejeita assinatura ausente, inválida, de outro app ou de outro corpo", async () => {
@@ -424,6 +799,89 @@ function connectRequest(app, overrides = {}) {
   };
 }
 
+test("ativação e nome são persistidos somente para administradores", async () => {
+  const h = createHarness();
+  const request = connectRequest(appA, { action: "active", active: false });
+  await h.updateNumber(request);
+  assert.equal(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`).active, false);
+  request.data = { phoneNumberId: appA.phoneNumberId, action: "name", displayName: "  Equipe  " };
+  await h.updateNumber(request);
+  assert.equal(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`).displayName, "Equipe");
+  request.data.displayName = " ";
+  await assert.rejects(h.updateNumber(request), (error) => error.code === "invalid-argument");
+  request.data = { phoneNumberId: appA.phoneNumberId, action: "active", active: "false" };
+  await assert.rejects(h.updateNumber(request), (error) => error.code === "invalid-argument");
+  request.data.active = true;
+  request.auth = { uid: "sales", token: { email: "vendas@example.test" } };
+  await assert.rejects(h.updateNumber(request), (error) => error.code === "permission-denied");
+  request.auth = null;
+  await assert.rejects(h.updateNumber(request), (error) => error.code === "unauthenticated");
+});
+
+test("verificação não invasiva consulta a Meta e sinaliza falha sem revelar credenciais", async () => {
+  const h = createHarness();
+  const request = connectRequest(appA);
+  h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token-secreto");
+  const success = await h.checkNumber(request);
+  assert.equal(success.operational, true);
+  assert.equal(h.graphCalls.at(-1).method, "GET");
+  assert.equal(h.graphCalls.at(-1).fields, "id");
+  h.failures.fetch = async () => { throw new Error("Meta indisponível"); };
+  const failure = await h.checkNumber(request);
+  assert.equal(failure.operational, false);
+  assert.equal(JSON.stringify(failure).includes("token-secreto"), false);
+  request.auth = null;
+  await assert.rejects(h.checkNumber(request), (error) => error.code === "unauthenticated");
+});
+
+test("automação persiste uma única ativa e resolve nomes confiáveis das colunas", async () => {
+  const h = createHarness();
+  h.documents.set("colunas/vendas", { nome: "Entrada vendas*", ordem: 0 });
+  h.documents.set("colunas/interna", { nome: "Oculta*", ordem: 1 });
+  const messages = [{
+    id: "mensagem-1", name: "MENSAGEM 1", blocks: [
+      { type: "text", text: "Escolha uma opção" },
+      { type: "option", trigger: "1", description: "Vendas", columnId: "vendas", columnName: "Nome enviado pelo cliente", bold: true, styled: true, style: "Opção 1" },
+      { type: "hidden", trigger: "financeiro", description: "anotação", columnId: "interna", columnName: "Oculta*" }
+    ]
+  }];
+  const result = await h.saveAutomation(connectRequest(appA, {
+    phoneNumberId: appA.phoneNumberId, botMessages: messages,
+    activeBotMessageId: "mensagem-1", onlyRecipientInitiated: true
+  }));
+  assert.equal(result.number.activeBotMessageId, "mensagem-1");
+  assert.equal(result.number.onlyRecipientInitiated, true);
+  assert.equal(result.number.botMessages[0].blocks[1].columnName, "Entrada vendas*");
+  assert.equal(whatsappAutomation.renderMessage(result.number.botMessages[0].blocks), "Escolha uma opção\n*Opção 1* - Vendas");
+});
+
+test("automação rejeita blocos incompletos, gatilhos repetidos e colunas inválidas", async () => {
+  const h = createHarness();
+  h.documents.set("colunas/normal", { nome: "Sem asterisco", ordem: 0 });
+  const base = {
+    phoneNumberId: appA.phoneNumberId, activeBotMessageId: "", onlyRecipientInitiated: false
+  };
+  const invalid = [
+    [{ id: "1", name: "Mensagem", blocks: [{ type: "text", text: " " }] }],
+    [{ id: "1", name: "Mensagem", blocks: [
+      { type: "option", trigger: "1", description: "", columnId: "normal", columnName: "Sem asterisco", bold: false, styled: false, style: "" },
+      { type: "hidden", trigger: " 1 ", description: "", columnId: "normal", columnName: "Sem asterisco" }
+    ] }],
+    [{ id: "1", name: "Mensagem", blocks: [
+      { type: "option", trigger: "1", description: "", columnId: "normal", columnName: "Sem asterisco", bold: false, styled: false, style: "" }
+    ] }]
+  ];
+  for (const botMessages of invalid) {
+    await assert.rejects(
+      h.saveAutomation(connectRequest(appA, { ...base, botMessages })),
+      (error) => error.code === "invalid-argument" || error.code === "failed-precondition"
+    );
+  }
+  await assert.rejects(h.saveAutomation(connectRequest(appA, {
+    ...base, activeBotMessageId: "ausente", botMessages: []
+  })), (error) => error.code === "invalid-argument");
+});
+
 test("versões com ID ou número do projeto funcionam e referências de outro projeto são rejeitadas", async () => {
   const h = createHarness();
   const ref = `whatsappNumbers/_apps/apps/${appA.id}`;
@@ -451,7 +909,9 @@ test("cadastro atualiza versões existentes sem recriar secrets e mantém as con
   h.documents.set(appPath, { ...h.documents.get(appPath), criadoEm: "data-original" });
   h.documents.set(numberPath, {
     ...h.documents.get(numberPath), active: false, captureEnabled: false,
-    preAtendimentoEnabled: true, preAtendimentoMessage: "mensagem anterior"
+    preAtendimentoEnabled: true, preAtendimentoMessage: "mensagem anterior", displayName: "Nome salvo",
+    botMessages: [{ id: "m1", name: "MENSAGEM 1", blocks: [{ type: "text", text: "Texto" }] }],
+    activeBotMessageId: "m1", onlyRecipientInitiated: false
   });
   const request = connectRequest(appA, {
     appSecret: "updated-app-secret",
@@ -468,6 +928,9 @@ test("cadastro atualiza versões existentes sem recriar secrets e mantém as con
   assert.equal(number.preAtendimentoMessage, "mensagem anterior");
   assert.equal(result.number.active, false);
   assert.equal(result.number.captureEnabled, false);
+  assert.equal(result.number.displayName, "Nome salvo");
+  assert.equal(result.number.activeBotMessageId, "m1");
+  assert.equal(result.number.onlyRecipientInitiated, false);
   assert.equal(h.calls.some((call) => call.operation === "create" && call.name.includes(`app-${appA.id}-`)), false);
   assert.equal((await h.webhook({ route: `/${appA.id}`, method: "GET", query: verifyQuery("updated-verify-token") })).statusCode, 200);
   assert.equal((await h.webhook({ route: `/${appA.id}`, method: "GET", query: verifyQuery(appA.verifyToken) })).statusCode, 403);
@@ -481,32 +944,83 @@ test("cadastro atualiza versões existentes sem recriar secrets e mantém as con
 
 test("novo número do mesmo app usa IDs informados, inclusive na segunda página da WABA", async () => {
   const h = createHarness();
-  const newPhoneId = "5000002";
+  const newPhoneId = "849591261693565";
   h.graphPages.set(`${appA.wabaId}:`, {
-    data: [{ id: appA.phoneNumberId, display_phone_number: "Número antigo" }],
+    data: [{ id: appA.phoneNumberId }],
     paging: { next: "https://graph.facebook.com/next", cursors: { after: "cursor+2" } }
   });
   h.graphPages.set(`${appA.wabaId}:cursor+2`, {
-    data: [{ id: newPhoneId, display_phone_number: "Número novo", verified_name: "Nome novo" }]
+    data: [{ id: newPhoneId }]
   });
-  const result = await h.connect(connectRequest(appA, { phoneNumberId: newPhoneId }));
+  const result = await h.connect(connectRequest(appA, { phoneNumberId: newPhoneId, displayName: "  Equipe nova  " }));
 
   assert.equal(result.number.phoneNumberId, newPhoneId);
   assert.equal(result.number.wabaId, appA.wabaId);
   assert.equal(result.number.displayPhoneNumber, "Número novo");
+  assert.equal(result.number.displayName, "Equipe nova");
   assert.equal(h.documents.get(`whatsappNumbers/${newPhoneId}`).wabaId, appA.wabaId);
   assert.equal(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`).wabaId, appA.wabaId);
+  assert.equal(h.graphCalls[0].fields, "id");
+  assert.equal(h.graphCalls[1].fields, "id");
   assert.equal(h.graphCalls[1].after, "cursor+2");
-  assert.equal(h.graphCalls[2].path, `/v25.0/${appA.wabaId}/subscribed_apps`);
+  assert.equal(h.graphCalls[2].path, `/v25.0/${newPhoneId}`);
+  assert.equal(h.graphCalls[2].fields, "id,display_phone_number,verified_name");
+  assert.equal(h.graphCalls[3].path, `/v25.0/${appA.wabaId}/subscribed_apps`);
+});
+
+test("cadastro rejeita dados da Meta para um número diferente antes de salvar", async () => {
+  const h = createHarness();
+  h.graphNumbers.set(appA.phoneNumberId, { id: appB.phoneNumberId });
+  await assert.rejects(h.connect(connectRequest(appA)),
+    (error) => error.code === "failed-precondition" && /número diferente/.test(error.message));
+  assert.equal(h.graphCalls.length, 2);
+  assert.equal(h.calls.length, 0);
 });
 
 test("cadastro rejeita número fora da WABA antes de assinar ou salvar credenciais", async () => {
   const h = createHarness();
   await assert.rejects(h.connect(connectRequest(appA, { phoneNumberId: "5000003" })),
-    (error) => error.code === "failed-precondition" && /não pertence à WABA/.test(error.message));
+    (error) => error.code === "failed-precondition" && error.message.includes(`único ID retornado para esta WABA é ${appA.phoneNumberId}`));
   assert.equal(h.graphCalls.length, 1);
   assert.equal(h.calls.length, 0);
   assert.equal(h.documents.has("whatsappNumbers/5000003"), false);
+  assert.equal(h.warnings[0][1].paginasConsultadas, 1);
+  assert.equal(h.warnings[0][1].numerosRetornados, 1);
+  assert.equal(JSON.stringify(h.warnings).includes("test-access-token"), false);
+});
+
+test("diagnóstico conta todas as páginas quando o número não é retornado", async () => {
+  const h = createHarness();
+  h.graphPages.set(`${appA.wabaId}:`, {
+    data: [{ id: "5000004" }, { id: 42 }, { id: "test-access-token-123456789" }],
+    paging: { next: "next", cursors: { after: "cursor" } }
+  });
+  h.graphPages.set(`${appA.wabaId}:cursor`, { data: [] });
+  await assert.rejects(h.connect(connectRequest(appA)),
+    (error) => error.code === "failed-precondition" && /não retornou o Phone Number ID/.test(error.message));
+  assert.equal(h.warnings[0][1].paginasConsultadas, 2);
+  assert.equal(h.warnings[0][1].numerosRetornados, 3);
+  assert.equal(h.calls.length, 0);
+});
+
+test("ID digitado incorretamente mostra o único ID retornado sem vincular outro número", async () => {
+  const h = createHarness();
+  const correctId = "8495912616936565";
+  const incorrectId = "849591261693565";
+  h.graphPages.set(`${appA.wabaId}:`, {
+    data: [{ id: correctId }],
+    paging: { next: "next", cursors: { after: "cursor" } }
+  });
+  h.graphPages.set(`${appA.wabaId}:cursor`, { data: [] });
+  h.graphNumbers.set(correctId, { id: correctId, display_phone_number: "Número novo" });
+  await assert.rejects(h.connect(connectRequest(appA, { phoneNumberId: incorrectId })),
+    (error) => error.code === "failed-precondition" && error.message.includes(correctId));
+  assert.equal(h.documents.has(`whatsappNumbers/${incorrectId}`), false);
+  assert.equal(h.calls.length, 0);
+
+  const result = await h.connect(connectRequest(appA, { phoneNumberId: correctId }));
+  assert.equal(result.number.phoneNumberId, correctId);
+  assert.equal(h.documents.get(`whatsappNumbers/${correctId}`).wabaId, appA.wabaId);
 });
 
 test("cadastro rejeita paginação inválida sem gravar credenciais", async () => {

@@ -9,7 +9,7 @@
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,400;6..144,600;6..144,700&family=Hind+Guntur:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/layout-base.css">
   <link rel="stylesheet" href="css/conexoes.css">
@@ -136,44 +136,28 @@
           </div>
 
           <div id="aviso-conexoes" class="conexoes-aviso" role="status"></div>
-          <section class="conexoes-painel">
+          <div class="conexoes-colunas">
+          <section class="conexoes-painel conexoes-canal">
             <div class="conexoes-titulo-secao">
               <div>
-                <h2>WhatsApp Business Platform</h2>
-                <p>Conecte números pela API oficial da Meta. Tokens e segredos são guardados no Google Secret Manager.</p>
+                <h2>CONEXÕES DE WHATSAPP</h2>
+                <span class="conexoes-status" id="status-integracao">Verificando integração...</span>
               </div>
-              <span class="conexoes-status" id="status-integracao">Verificando integração...</span>
+              <div class="conexoes-canal-acoes">
+                <a class="conexoes-icone" href="conexoes-ajuda.html" target="_blank" rel="noopener noreferrer" aria-label="Ajuda sobre conexões">?</a>
+                <button type="button" class="conexoes-icone" id="botao-adicionar-numero" aria-label="Adicionar número" hidden>+</button>
+              </div>
             </div>
-            <div id="form-conectar-wrap" class="conexoes-form-wrap" hidden>
-              <h3>Vincular número</h3>
-              <form id="form-conectar" class="conexoes-form">
-                <label>App ID do Meta for Developers
-                  <input id="app-id" name="appId" list="apps-meta" required inputmode="numeric" pattern="[0-9]{6,25}" maxlength="25" autocomplete="off" placeholder="Informe ou selecione um App ID">
-                  <datalist id="apps-meta"></datalist>
-                </label>
-                <label>Phone Number ID<input name="phoneNumberId" required inputmode="numeric" pattern="[0-9]{6,25}" maxlength="25" autocomplete="off" placeholder="ID do número no Meta for Developers"></label>
-                <label>WhatsApp Business Account ID<input name="wabaId" required inputmode="numeric" pattern="[0-9]{6,25}" maxlength="25" autocomplete="off" placeholder="ID da conta empresarial"></label>
-                <label>Token de acesso permanente<input name="accessToken" type="password" required autocomplete="new-password"></label>
-                <label>App Secret<input name="appSecret" type="password" required autocomplete="new-password"></label>
-                <label>Token de verificação do webhook<input name="verifyToken" type="password" required minlength="8" autocomplete="new-password"></label>
-                <p class="texto-ajuda">Confira os IDs do número e da conta na confirmação antes de vincular. Para um app já cadastrado, informe o App Secret e o token de verificação atuais; alterá-los afeta todos os números desse app. Eles não são exibidos depois de salvos. Ao trocar de app, as credenciais digitadas são apagadas.</p>
-                <div class="conexoes-form-acoes">
-                  <label for="webhook-url" style="flex: 1; min-width: 0;">URL prevista do webhook para este app
-                    <input id="webhook-url" type="text" readonly placeholder="Informe um App ID válido" aria-describedby="webhook-ajuda">
-                  </label>
-                  <button type="button" id="copiar-webhook" class="conexoes-botao-secundario" disabled>Copiar URL</button>
-                </div>
-                <p class="texto-ajuda" id="webhook-ajuda">A URL usa o projeto e a região configurados. Confirme a URL da função após o deploy e acrescente o App ID; a conexão só funcionará após a implantação e a configuração na Meta.</p>
-                <div class="conexoes-form-acoes">
-                  <p>Escolha o token de verificação e informe o mesmo valor no painel da Meta. Guarde as credenciais com segurança.</p>
-                  <button type="submit" class="conexoes-botao-primario">Vincular número</button>
-                </div>
-              </form>
-            </div>
+            <datalist id="apps-meta"></datalist>
             <div id="lista-numeros" class="conexoes-lista-numeros">
               <p class="texto-ajuda">Carregando números...</p>
             </div>
           </section>
+          <section class="conexoes-painel conexoes-canal">
+            <div class="conexoes-titulo-secao"><h2>CONEXÕES DE EMAIL</h2></div>
+            <p class="texto-ajuda">A configuração de e-mail será disponibilizada em outra etapa.</p>
+          </section>
+          </div>
 
           <section class="conexoes-painel">
             <div class="conexoes-titulo-secao">
