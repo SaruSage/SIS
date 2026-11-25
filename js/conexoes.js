@@ -277,10 +277,18 @@ formConectar.addEventListener("submit", async (evento) => {
   if (!ehAdmin) return;
   const botao = formConectar.querySelector("button[type='submit']");
   const dados = Object.fromEntries(new FormData(formConectar).entries());
-  botao.disabled = true;
+  for (const campo of ["appId", "phoneNumberId", "wabaId"]) dados[campo] = dados[campo].trim();
+  if (!window.confirm("Confirme os IDs que serão enviados:\n\nApp ID: " + dados.appId +
+      "\nPhone Number ID: " + dados.phoneNumberId + "\nWABA ID: " + dados.wabaId)) return;
+  const controles = [...formConectar.elements].map((elemento) => [elemento, elemento.disabled]);
+  controles.forEach(([elemento]) => { elemento.disabled = true; });
   botao.textContent = "Validando e vinculando...";
   try {
     const resultado = await executarCallable("connectWhatsAppNumber", dados);
+    if (!resultado.number || resultado.number.phoneNumberId !== dados.phoneNumberId ||
+        resultado.number.wabaId !== dados.wabaId || resultado.number.appId !== dados.appId) {
+      throw new Error("O backend retornou IDs diferentes dos enviados. Confira os números vinculados antes de tentar novamente.");
+    }
     const existente = numeros.findIndex((numero) => numero.phoneNumberId === resultado.number.phoneNumberId);
     if (existente >= 0) numeros[existente] = resultado.number;
     else numeros.push(resultado.number);
@@ -288,20 +296,17 @@ formConectar.addEventListener("submit", async (evento) => {
     campoAppId.value = dados.appId.trim();
     appIdAnterior = campoAppId.value;
     atualizarWebhook();
+    campoBusca.value = "";
     renderizarNumeros();
     preencherSeletores();
     statusIntegracao.textContent = numeros.length + (numeros.length === 1 ? " número vinculado" : " números vinculados");
     statusIntegracao.classList.remove("vazio");
-    if (resultado.number.appId === dados.appId.trim()) {
-      mostrarAviso("Número vinculado ao app. Confirme a URL da função após o deploy e configure o webhook na Meta.", "sucesso");
-    } else {
-      mostrarAviso("O número foi vinculado, mas o backend não confirmou o App ID. Atualize as Functions antes de configurar o webhook específico.", "erro");
-    }
+    mostrarAviso("Número vinculado ao app. Confirme a URL da função após o deploy e configure o webhook na Meta.", "sucesso");
   } catch (erro) {
     console.error("Erro ao vincular número WhatsApp:", erro);
     mostrarAviso(erro.message || "Não foi possível vincular o número.", "erro");
   } finally {
-    botao.disabled = false;
+    controles.forEach(([elemento, disabled]) => { elemento.disabled = disabled; });
     botao.textContent = "Vincular número";
   }
 });

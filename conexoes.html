@@ -151,12 +151,12 @@
                   <input id="app-id" name="appId" list="apps-meta" required inputmode="numeric" pattern="[0-9]{6,25}" maxlength="25" autocomplete="off" placeholder="Informe ou selecione um App ID">
                   <datalist id="apps-meta"></datalist>
                 </label>
-                <label>Phone Number ID<input name="phoneNumberId" required inputmode="numeric" placeholder="ID do número no Meta for Developers"></label>
-                <label>WhatsApp Business Account ID<input name="wabaId" required inputmode="numeric" placeholder="ID da conta empresarial"></label>
+                <label>Phone Number ID<input name="phoneNumberId" required inputmode="numeric" pattern="[0-9]{6,25}" maxlength="25" autocomplete="off" placeholder="ID do número no Meta for Developers"></label>
+                <label>WhatsApp Business Account ID<input name="wabaId" required inputmode="numeric" pattern="[0-9]{6,25}" maxlength="25" autocomplete="off" placeholder="ID da conta empresarial"></label>
                 <label>Token de acesso permanente<input name="accessToken" type="password" required autocomplete="new-password"></label>
                 <label>App Secret<input name="appSecret" type="password" required autocomplete="new-password"></label>
                 <label>Token de verificação do webhook<input name="verifyToken" type="password" required minlength="8" autocomplete="new-password"></label>
-                <p class="texto-ajuda">Selecione um app associado a um número existente ou informe outro App ID. Para um app já cadastrado, informe novamente o mesmo App Secret e token de verificação; eles não são exibidos depois de salvos. Ao trocar de app, as credenciais digitadas são apagadas.</p>
+                <p class="texto-ajuda">Confira os IDs do número e da conta na confirmação antes de vincular. Para um app já cadastrado, informe o App Secret e o token de verificação atuais; alterá-los afeta todos os números desse app. Eles não são exibidos depois de salvos. Ao trocar de app, as credenciais digitadas são apagadas.</p>
                 <div class="conexoes-form-acoes">
                   <label for="webhook-url" style="flex: 1; min-width: 0;">URL prevista do webhook para este app
                     <input id="webhook-url" type="text" readonly placeholder="Informe um App ID válido" aria-describedby="webhook-ajuda">
