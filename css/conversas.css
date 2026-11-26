@@ -1,15 +1,18 @@
-.app-header .titulo-modulo-header { margin: 0; color: var(--texto); font-size: 18.5px; font-weight: 800; white-space: nowrap; }
-body.tema-escuro .app-header .titulo-modulo-header { color: #e8edf5; }
+.pagina-conversas .app-main { background: #0f1726; }
+.pagina-conversas .app-header { background: #121b2c; border-bottom-color: #2a354a; }
+.pagina-conversas .app-header .titulo-modulo-header { margin: 0; color: #e8edf5; font-size: 18.5px; font-weight: 800; white-space: nowrap; }
+.pagina-conversas .app-header .nome-header { color: #dce5f1; }
+.pagina-conversas .app-header .botao-perfil-header { color: #dce5f1; }
 
 .conversas-layout {
-  --chat-painel: #fff;
-  --chat-fundo: #f4f6fa;
-  --chat-borda: #e0e6ef;
-  --chat-texto: #25354e;
-  --chat-secundario: #6f8099;
-  --chat-selecao: #edf2f8;
-  --chat-entrada: #e8edf4;
-  --chat-saida: #d7f0e2;
+  --chat-painel: #1b2538;
+  --chat-fundo: #111a29;
+  --chat-borda: #2d394f;
+  --chat-texto: #e5eaf2;
+  --chat-secundario: #8995aa;
+  --chat-selecao: #303d53;
+  --chat-entrada: #626979;
+  --chat-saida: #17422f;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -27,18 +30,23 @@ body.tema-escuro .app-header .titulo-modulo-header { color: #e8edf5; }
 .fila-cabecalho p { margin: 5px 0 0; color: var(--chat-secundario); font-size: 12px; }
 .conversas-fila .conversas-busca { width: calc(100% - 32px); margin: 16px 16px 10px; padding: 10px 12px; border: 1px solid var(--chat-borda); border-radius: 8px; background: var(--chat-fundo); color: var(--chat-texto); font: inherit; font-size: 13px; }
 .conversas-busca::placeholder, .compositor textarea::placeholder { color: var(--chat-secundario); }
-.fila-opcoes { margin: 0 16px 10px; color: var(--chat-texto); font-size: 12px; }
+.fila-opcoes { margin: 0 16px 10px; padding: 9px 11px; border: 1px solid var(--chat-borda); border-radius: 10px; background: var(--chat-fundo); color: var(--chat-texto); font-size: 12px; }
 .fila-opcoes summary, .envio-opcoes summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
-.fila-opcoes form { display: grid; gap: 8px; padding: 8px 0; }
+.fila-opcoes form { display: grid; gap: 10px; padding: 10px 0 2px; }
 .fila-opcoes form > label { display: grid; gap: 5px; }
 .fila-opcoes input:not([type="checkbox"]) { width: 100%; padding: 8px; border: 1px solid var(--chat-borda); border-radius: 7px; background: var(--chat-fundo); color: var(--chat-texto); }
 .fila-opcoes button, .conversa-estados button { width: auto; margin: 0; padding: 7px 10px; border: 1px solid var(--chat-borda); border-radius: 7px; background: var(--chat-fundo); color: var(--chat-texto); font: inherit; cursor: pointer; }
 .fila-opcoes button:hover, .conversa-estados button:hover { background: var(--chat-selecao); }
 .conversa-estados button:disabled { opacity: .5; cursor: not-allowed; }
-#colunas-solicitacao, #membros-grupo { max-height: 130px; overflow: auto; }
-#colunas-solicitacao label, #membros-grupo label { display: block; padding: 4px 0; font-size: 12px; }
+#colunas-solicitacao, #membros-grupo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 180px; overflow: auto; padding: 2px; }
+#colunas-solicitacao label, #membros-grupo label { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 9px; border: 1px solid var(--chat-borda); border-radius: 8px; background: var(--chat-painel); color: var(--chat-texto); font-size: 12px; line-height: 1.3; cursor: pointer; }
+#colunas-solicitacao label:hover, #membros-grupo label:hover { border-color: #54bf85; background: var(--chat-selecao); }
+#colunas-solicitacao input[type="checkbox"], #membros-grupo input[type="checkbox"] { flex: 0 0 16px; width: 16px; height: 16px; margin: 0; accent-color: #38a96a; }
+#solicitacao-colunas button[type="submit"] { width: 100%; border-color: #48b87d; background: #59c58b; color: #10251c; font-weight: 700; }
+#solicitacao-colunas button[type="submit"]:hover { background: #70d49f; }
 .fila-listagens { flex: 1; min-height: 0; overflow: auto; border-top: 1px solid var(--chat-borda); }
 .fila-listagens h3 { margin: 16px 16px 6px; color: var(--chat-secundario); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.fila-listagens .lista-erro { margin: 6px 16px; color: var(--chat-texto); font-size: 12px; line-height: 1.4; }
 .conversas-lista { flex: 1; min-height: 0; overflow: auto; color: var(--chat-secundario); font-size: 12px; }
 #lista-conversas { border-top: 1px solid var(--chat-borda); }
 .fila-listagens .conversas-lista { overflow: visible; }
@@ -73,31 +81,102 @@ body.tema-escuro .app-header .titulo-modulo-header { color: #e8edf5; }
 .mensagem-grupo { display: flex; flex-direction: column; align-items: flex-start; align-self: flex-start; max-width: min(80%, 600px); gap: 5px; }
 .mensagem-grupo.saida { align-self: flex-end; align-items: flex-end; }
 .mensagem-grupo .whatsapp-mensagem-atendente { margin: 0 4px; padding: 3px 7px; border-radius: 7px; background: var(--chat-selecao); color: var(--chat-secundario); font-size: 11px; font-weight: 600; }
-.conversas-painel .whatsapp-mensagem { max-width: 100%; padding: 11px 13px; border-radius: 11px; background: var(--chat-entrada); color: var(--chat-texto); box-shadow: none; }
+.conversas-painel .whatsapp-mensagem { max-width: 100%; padding: 11px 13px; border-radius: 12px; background: var(--chat-entrada); color: #f4f6fa; box-shadow: none; }
 .conversas-painel .whatsapp-mensagem-saida { background: var(--chat-saida); }
 .conversas-painel .whatsapp-mensagem small { color: var(--chat-secundario); text-align: right; }
-.conversas-painel .whatsapp-conversa-form { display: grid; flex: 0 0 auto; gap: 8px; max-height: 45%; overflow: auto; padding: 10px 14px 14px; border-top: 1px solid var(--chat-borda); background: var(--chat-painel); }
+.conversas-painel .whatsapp-conversa-form { display: grid; flex: 0 0 auto; gap: 8px; padding: 10px 14px 14px; border-top: 1px solid var(--chat-borda); background: var(--chat-painel); }
 .envio-opcoes { color: var(--chat-secundario); font-size: 12px; }
 .envio-opcoes-campos, #campos-template:not([hidden]) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-bottom: 4px; }
 #campos-template label:last-child { grid-column: 1 / -1; }
 #campo-texto[hidden] { display: none; }
-.compositor { display: flex; align-items: flex-end; gap: 8px; }
+.compositor { display: flex; align-items: center; gap: 7px; min-height: 54px; padding: 5px 6px 5px 16px; border: 1px solid #354258; border-radius: 15px; background: #222d42; }
 .compositor label { flex: 1; min-width: 0; }
-.conversas-painel .compositor textarea { min-height: 44px; max-height: 120px; resize: vertical; background: var(--chat-fundo); border-color: var(--chat-borda); color: var(--chat-texto); }
-.compositor button { flex: 0 0 auto; width: auto; min-height: 44px; margin: 0; padding: 0 16px; background: #258a59; color: #fff; white-space: nowrap; }
-.compositor button:hover { background: #20774e; }
+.conversas-painel .compositor textarea { display: block; width: 100%; min-height: 38px; max-height: 120px; padding: 9px 0; resize: none; border: 0; outline: 0; background: transparent; color: #f0f3f8; font: inherit; }
+.compositor button { display: grid; flex: 0 0 42px; width: 42px; height: 42px; min-height: 42px; margin: 0; padding: 10px; place-items: center; border: 0; border-radius: 11px; background: transparent; color: #a7b3c8; cursor: pointer; }
+.compositor button:hover { background: #303d53; color: #f4f7fb; }
+.compositor button:disabled { opacity: .5; cursor: not-allowed; }
+.compositor button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.compositor .compositor-enviar { flex-basis: 48px; width: 48px; height: 48px; background: #59c58b; color: #10251c; }
+.compositor .compositor-enviar:hover { background: #70d49f; color: #10251c; }
+.compositor .compositor-enviar svg { width: 23px; height: 23px; fill: none; stroke-width: 2; }
+.compositor .envio-opcoes { position: relative; z-index: 3; flex: 0 0 42px; align-self: center; }
+.compositor .envio-opcoes summary { display: grid; width: 42px; height: 42px; padding: 0; place-items: center; border-radius: 11px; color: #a7b3c8; list-style: none; }
+.compositor .envio-opcoes summary::-webkit-details-marker { display: none; }
+.compositor .envio-opcoes summary:hover, .compositor .envio-opcoes[open] summary { background: #303d53; color: #f4f7fb; }
+.compositor .envio-opcoes summary:focus-visible { outline: 2px solid #59c58b; outline-offset: 2px; }
+.compositor .envio-opcoes summary svg { width: 20px; height: 20px; fill: currentColor; }
+.envio-opcoes-painel { position: absolute; bottom: calc(100% + 10px); left: 0; z-index: 10; width: min(340px, calc(100vw - 32px)); max-height: min(60vh, 500px); overflow: auto; padding: 14px; border: 1px solid var(--chat-borda); border-radius: 12px; background: var(--chat-painel); box-shadow: 0 12px 32px rgb(0 0 0 / 24%); }
+.envio-opcoes-painel label { display: grid; min-width: 0; gap: 5px; color: var(--chat-texto); font-size: 12px; font-weight: 600; }
+.envio-opcoes-painel #campos-template:not([hidden]) { margin-top: 10px; }
+.arquivo-input { display: none; }
+.arquivo-selecionado { margin: 0; padding: 7px 10px; border: 1px solid var(--chat-borda); border-radius: 9px; color: var(--chat-secundario); font-size: 12px; overflow-wrap: anywhere; }
+.arquivo-selecionado:not([hidden]) { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.arquivo-remover { border: 0; background: transparent; color: var(--chat-texto); cursor: pointer; }
+.whatsapp-mensagem a { color: #87c8ff; text-decoration: underline; overflow-wrap: anywhere; }
+.whatsapp-mensagem-midia { display: grid; max-width: min(100%, 360px); gap: 6px; }
+.whatsapp-mensagem-midia img, .whatsapp-mensagem-midia video { display: block; max-width: 100%; max-height: 340px; border-radius: 9px; object-fit: contain; }
+.whatsapp-mensagem-midia audio { width: min(300px, 100%); }
+.midia-carregar { width: auto; justify-self: start; padding: 6px 9px; border: 1px solid #78849a; border-radius: 8px; background: #263248; color: #e5eaf2; cursor: pointer; font: inherit; font-size: 12px; }
+.midia-indisponivel { color: #e6c480; font-size: 12px; }
+.whatsapp-mensagem-local, .whatsapp-mensagem-contato { display: block; margin-top: 6px; }
+.whatsapp-mensagem-contato { display: grid; gap: 3px; padding: 9px; border: 1px solid #536078; border-radius: 8px; }
+.whatsapp-mensagem-contato span { font-size: 12px; }
 .conversas-painel .mensagem { margin: 8px 14px 14px; padding: 10px 12px; border: 1px solid var(--chat-borda); background: var(--chat-fundo); color: var(--chat-texto); text-align: left; font-size: 12px; }
-.conversas-painel .mensagem.erro { border-color: #b98f8b; background: #fbefed; color: #853b35; }
+.conversas-painel .mensagem.erro { border-color: #62484b; background: #30272c; color: #e7b6b3; }
+.pagina-conversas #conversas-aviso, .pagina-chats-internos #chat-aviso { position: fixed; top: 76px; right: 20px; z-index: 1000; width: min(420px, calc(100vw - 32px)); max-height: 35vh; overflow: auto; margin: 0; box-shadow: 0 8px 26px rgb(0 0 0 / 20%); }
 
-body.tema-escuro .conversas-layout { --chat-painel: #192638; --chat-fundo: #101b29; --chat-borda: #2a394d; --chat-texto: #e4ebf4; --chat-secundario: #a0afc3; --chat-selecao: #304052; --chat-entrada: #3a495a; --chat-saida: #185235; }
-body.tema-escuro .conversa-avatar { background: #293d59; color: #aec2e9; }
-body.tema-escuro .conversa-etiqueta.para-voce { color: #86dbaa; }
-body.tema-escuro .conversa-status.status-ativo { color: #99e2b6; background: #183e2d; border-color: #285d43; }
-body.tema-escuro .conversa-status.status-aviso { color: #e6c480; background: #403522; border-color: #665234; }
-body.tema-escuro .conversas-painel .whatsapp-conversa-lista { background: var(--chat-fundo); }
-body.tema-escuro .conversas-painel .whatsapp-mensagem { background: var(--chat-entrada); color: var(--chat-texto); }
-body.tema-escuro .conversas-painel .whatsapp-mensagem-saida { background: var(--chat-saida); }
-body.tema-escuro .conversas-painel .mensagem.erro { border-color: #62484b; background: #30272c; color: #e7b6b3; }
+.conversa-avatar { background: #293d59; color: #aec2e9; }
+.conversa-etiqueta.para-voce { color: #86dbaa; }
+.conversa-status.status-ativo { color: #99e2b6; background: #183e2d; border-color: #285d43; }
+.conversa-status.status-aviso { color: #e6c480; background: #403522; border-color: #665234; }
+.conversas-painel .whatsapp-conversa-lista { background: var(--chat-fundo); }
+.conversas-painel .whatsapp-mensagem-saida { color: #e8f4ec; }
+.conversas-painel .mensagem.erro { border-color: #62484b; background: #30272c; color: #e7b6b3; }
+
+html.tema-claro .pagina-conversas .app-main { background: #f3f5f9; }
+html.tema-claro .pagina-conversas .app-header { background: #fff; border-bottom-color: #e2e8f0; }
+html.tema-claro .pagina-conversas .app-header .titulo-modulo-header,
+html.tema-claro .pagina-conversas .app-header .nome-header,
+html.tema-claro .pagina-conversas .app-header .botao-perfil-header { color: #263449; }
+html.tema-claro .conversas-layout {
+  --chat-painel: #fff;
+  --chat-fundo: #f3f5f9;
+  --chat-borda: #dce3ed;
+  --chat-texto: #263449;
+  --chat-secundario: #68778d;
+  --chat-selecao: #e8eef6;
+  --chat-entrada: #e8edf4;
+  --chat-saida: #dff3e7;
+}
+html.tema-claro .conversa-avatar { background: #dfe9f8; color: #536fa6; }
+html.tema-claro .conversa-etiqueta.para-voce { color: #258753; }
+html.tema-claro .conversa-contagem { background: #b7efce; color: #174b2d; }
+html.tema-claro .conversa-status.status-ativo { color: #258753; background: #e4f5ea; border-color: #ccebd9; }
+html.tema-claro .conversa-status.status-aviso { color: #916616; background: #fbf3de; border-color: #e9dcb6; }
+html.tema-claro .conversa-janela-contagem { color: #68778d; }
+html.tema-claro .conversas-painel .whatsapp-mensagem { color: #263449; }
+html.tema-claro .conversas-painel .whatsapp-mensagem-saida { color: #1d4930; }
+html.tema-claro .compositor { border-color: #d4dce7; background: #fff; }
+html.tema-claro .conversas-painel .compositor textarea { color: #263449; }
+html.tema-claro .compositor button { color: #64748b; }
+html.tema-claro .compositor button:hover { background: #e8eef6; color: #263449; }
+html.tema-claro .compositor .compositor-enviar { background: #59c58b; color: #10251c; }
+html.tema-claro .compositor .compositor-enviar:hover { background: #70d49f; color: #10251c; }
+html.tema-claro .whatsapp-mensagem a { color: #1769aa; }
+html.tema-claro .midia-carregar { border-color: #cbd5e1; background: #e8eef6; color: #263449; }
+html.tema-claro .midia-carregar:hover { background: #dce5f0; }
+html.tema-claro .midia-indisponivel { color: #8a641c; }
+html.tema-claro .whatsapp-mensagem-contato { border-color: #cbd5e1; }
+html.tema-claro .conversas-painel .mensagem.erro { border-color: #e7c7c7; background: #fbefef; color: #8c4141; }
+html.tema-claro .compositor .envio-opcoes summary { color: #64748b; }
+html.tema-claro .compositor .envio-opcoes summary:hover,
+html.tema-claro .compositor .envio-opcoes[open] summary { background: #e8eef6; color: #263449; }
+
+.conversa-janela { display: grid; justify-items: center; gap: 4px; }
+.conversa-janela-contagem { color: #aab5c7; font-size: 10px; white-space: nowrap; }
+.whatsapp-mensagem-midia.whatsapp-figurinha-midia { max-width: 190px; }
+.whatsapp-mensagem-midia .whatsapp-figurinha { width: auto; max-width: 180px; max-height: 170px; }
+.figurinha-legenda { color: var(--chat-secundario); font-size: 11px; text-align: center; }
 
 @media (max-width: 850px) {
   .conversa-topo { flex-wrap: wrap; }
@@ -109,4 +188,11 @@ body.tema-escuro .conversas-painel .mensagem.erro { border-color: #62484b; backg
   .conversas-painel { flex: 0 0 auto; min-height: 500px; }
   #conversa-ativa:not([hidden]), #chat-ativo:not([hidden]) { min-height: 500px; }
   .mensagem-grupo { max-width: 90%; }
+}
+@media (max-width: 480px) {
+  #colunas-solicitacao, #membros-grupo { grid-template-columns: 1fr; }
+  .compositor { padding-left: 8px; gap: 4px; }
+  .compositor .envio-opcoes { flex-basis: 38px; }
+  .compositor .envio-opcoes summary { width: 38px; height: 40px; }
+  .envio-opcoes-painel { width: min(320px, calc(100vw - 28px)); }
 }

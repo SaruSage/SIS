@@ -3,6 +3,15 @@
    Depende de css/layout-base.css.
    ============================================================ */
 
+.adm-conteudo {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.adm-conteudo > * {
+  flex: 0 0 auto;
+}
+
 .bloco-adm {
   margin-bottom: 16px;
 }

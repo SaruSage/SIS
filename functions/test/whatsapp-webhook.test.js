@@ -33,6 +33,7 @@ const appB = {
 
 function createHarness() {
   const documents = new Map();
+  const storageObjects = new Map();
   const secrets = new Map();
   const secretResources = new Set();
   const errors = [];
@@ -54,6 +55,44 @@ function createHarness() {
     ["5000001", { id: "5000001", display_phone_number: "Número novo", verified_name: "Teste novo" }],
     ["849591261693565", { id: "849591261693565", display_phone_number: "Número novo", verified_name: "Nome novo" }]
   ]);
+
+  function storageFile(filePath) {
+    return {
+      getMetadata: async () => {
+        const object = storageObjects.get(filePath);
+        if (!object) throw Object.assign(new Error("Arquivo ausente"), { code: 404 });
+        return [{
+          size: String(object.buffer.length),
+          contentType: object.contentType,
+          metadata: object.metadata
+        }];
+      },
+      download: async () => {
+        const object = storageObjects.get(filePath);
+        if (!object) throw Object.assign(new Error("Arquivo ausente"), { code: 404 });
+        return [Buffer.from(object.buffer)];
+      },
+      save: async (buffer, options) => {
+        storageObjects.set(filePath, {
+          buffer: Buffer.from(buffer),
+          contentType: options.metadata.contentType,
+          metadata: options.metadata.metadata || {}
+        });
+      },
+      delete: async () => {
+        if (!storageObjects.has(filePath)) throw Object.assign(new Error("Arquivo ausente"), { code: 404 });
+        storageObjects.delete(filePath);
+      },
+      createReadStream: () => ({
+        on() { return this; },
+        pipe(response) {
+          response.body = Buffer.from(storageObjects.get(filePath).buffer);
+          response.headersSent = true;
+          return response;
+        }
+      })
+    };
+  }
 
   function documentRef(documentPath) {
     const ref = {
@@ -196,15 +235,26 @@ function createHarness() {
         return { initializeApp() {} };
       case "firebase-admin/auth":
         return { getAuth: () => ({
-          getUserByEmail: async (email) => ({
-            uid: email === "eamgfn4ever@gmail.com" ? "admin" : email === "vendas@example.test" ? "sales" : email.split("@")[0],
-            email, displayName: "Usuário"
-          }),
+          getUserByEmail: async (email) => {
+            if (failures.authByEmail) await failures.authByEmail(email);
+            return {
+              uid: email === "eamgfn4ever@gmail.com" ? "admin" : email === "vendas@example.test" ? "sales" : email.split("@")[0],
+              email, displayName: "Usuário"
+            };
+          },
           getUser: async (uid) => ({
             uid, email: uid === "admin" ? "eamgfn4ever@gmail.com" : uid === "sales" ? "vendas@example.test" : `${uid}@example.test`,
             displayName: uid
-          })
+          }),
+          verifyIdToken: async (token) => {
+            if (token === "valid-sales-token") return { uid: "sales", email: "vendas@example.test" };
+            if (token === "valid-outsider-token") return { uid: "outsider", email: "fora@example.test" };
+            if (token !== "valid-token") throw Object.assign(new Error("Token inválido"), { code: "auth/invalid-id-token" });
+            return { uid: "admin", email: "eamgfn4ever@gmail.com" };
+          }
         }) };
+      case "firebase-admin/storage":
+        return { getStorage: () => ({ bucket: () => ({ file: storageFile }) }) };
       case "firebase-admin/firestore":
         return {
           getFirestore: () => db,
@@ -232,20 +282,39 @@ function createHarness() {
     require: requireMock,
     exports,
     Buffer,
+    Blob,
+    FormData,
+    URL,
     AbortSignal,
     fetch: async (url, options) => {
       const parsed = new URL(url);
+      if (parsed.hostname === "lookaside.fbsbx.com") {
+        return { ok: true, arrayBuffer: async () => Buffer.from("image-data") };
+      }
       graphCalls.push({
         path: parsed.pathname,
         after: parsed.searchParams.get("after"),
         fields: parsed.searchParams.get("fields"),
         method: options.method || "GET",
-        payload: options.body ? JSON.parse(options.body) : null
+        payload: typeof options.body === "string" ? JSON.parse(options.body)
+          : options.body && typeof options.body.get === "function" ? {
+            messagingProduct: options.body.get("messaging_product"),
+            type: options.body.get("type"),
+            fileName: options.body.get("file").name
+          } : null
       });
       if (failures.fetch) await failures.fetch(parsed, options);
       const wabaId = parsed.pathname.split("/")[2];
       const body = parsed.pathname.endsWith("/messages")
         ? { messages: [{ id: "wamid-outgoing" }] }
+        : parsed.pathname.endsWith("/media")
+          ? { id: "media-uploaded" }
+          : parsed.pathname.endsWith("/meta-media-id")
+            ? {
+              url: "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=meta-media-id",
+              mime_type: "image/jpeg",
+              file_size: 10
+            }
         : parsed.pathname.endsWith("/phone_numbers")
         ? graphPages.get(`${wabaId}:${parsed.searchParams.get("after") || ""}`)
         : parsed.pathname.endsWith("/subscribed_apps")
@@ -318,15 +387,18 @@ function createHarness() {
   }
 
   return {
-    documents, secrets, secretResources, errors, warnings, calls, failures, graphCalls, graphPages, graphNumbers,
+    documents, storageObjects, secrets, secretResources, errors, warnings, calls, failures, graphCalls, graphPages, graphNumbers,
     webhook, connect: exports.connectWhatsAppNumber,
     updateNumber: exports.updateWhatsAppNumber, checkNumber: exports.checkWhatsAppNumberStatus,
     saveAutomation: exports.saveWhatsAppAutomation,
     sendMessage: exports.sendWhatsAppMessage, getMessages: exports.getWhatsAppMessages,
     countUnread: exports.contarNaoLidasWhatsApp,
     getConversationAccess: exports.listarAcessoConversas,
+    listMembers: exports.listarMembrosChat,
     setAttendance: exports.definirAtendimentoWhatsApp,
     markConversationRead: exports.marcarConversaWhatsAppLida,
+    getMedia: exports.whatsappMedia,
+    getInternalChatMedia: exports.internalChatMedia,
     configureColumnNotifications: exports.configurarNotificacaoColuna,
     requestColumnNotifications: exports.solicitarNotificacoesColunas,
     decideColumnNotifications: exports.decidirNotificacoesColunas,
@@ -456,19 +528,132 @@ test("mensagem manual registra atendente autenticado sem incluí-lo no payload d
     assert.equal(h.documents.get(`cards/${appA.cardId}`).ultimaMensagemWhatsapp, "Olá, cliente!");
 });
 
-test("mensagem manual usa identificação autenticada quando não há nome", async () => {
+test("mensagem manual resolve o nome do atendente no cadastro sem expor o e-mail", async () => {
+    const h = createHarness();
+    h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+    h.documents.set("solicitacoes/vendedor", {
+      email: "vendas@example.test", nome: "Marina Souza", cargo: "vendas", status: "aprovada"
+    });
+    h.documents.set("notificacoesColunas/suporte", {
+      destinatarios: [{ uid: "atendente-2", email: "vendas@example.test" }]
+    });
+    h.documents.set(`cards/${appA.cardId}`, {
+      ...h.documents.get(`cards/${appA.cardId}`),
+      colunaId: "suporte",
+      lastInboundAt: { toMillis: () => Date.now() }
+    });
+    const auth = { uid: "atendente-2", token: { email: "vendas@example.test" } };
+    await h.sendMessage({
+      auth,
+      data: { cardId: appA.cardId, phoneNumberId: appA.phoneNumberId, mode: "text", text: "Olá" }
+    });
+    const atendente = h.documents.get(`cards/${appA.cardId}/mensagensWhatsapp/wamid-outgoing`).atendente;
+    assert.equal(atendente.nome, "Marina Souza");
+    assert.equal(atendente.nome.includes("@"), false);
+});
+
+test("nome do administrador tem fallback legível em vez de mostrar o e-mail", async () => {
     const h = createHarness();
     h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
     h.documents.set(`cards/${appA.cardId}`, {
       ...h.documents.get(`cards/${appA.cardId}`),
       lastInboundAt: { toMillis: () => Date.now() }
     });
-    const auth = { uid: "atendente-2", token: { email: "eamgfn4ever@gmail.com" } };
+    const auth = { uid: "admin", token: { email: "eamgfn4ever@gmail.com" } };
     await h.sendMessage({
       auth,
       data: { cardId: appA.cardId, phoneNumberId: appA.phoneNumberId, mode: "text", text: "Olá" }
     });
-    assert.equal(h.documents.get(`cards/${appA.cardId}/mensagensWhatsapp/wamid-outgoing`).atendente.nome, auth.token.email);
+    assert.equal(h.documents.get(`cards/${appA.cardId}/mensagensWhatsapp/wamid-outgoing`).atendente.nome, "Samuel Cáceres");
+});
+
+test("histórico existente converte o e-mail antigo do atendente para nome legível", async () => {
+    const h = createHarness();
+    h.documents.set(`cards/${appA.cardId}/mensagensWhatsapp/wamid-legacy-name`, {
+      direction: "outgoing",
+      type: "text",
+      text: "Mensagem antiga",
+      atendente: { uid: "admin", nome: "eamgfn4ever@gmail.com" },
+      criadoEm: { toMillis: () => Date.now() }
+    });
+    const history = await h.getMessages({
+      auth: { uid: "admin", token: { email: "eamgfn4ever@gmail.com" } },
+      data: { cardId: appA.cardId }
+    });
+    assert.equal(history.messages[0].atendente.nome, "Samuel Cáceres");
+    assert.equal(history.messages[0].atendente.nome.includes("@"), false);
+});
+
+test("anexa e envia mídia sem adicionar o nome do atendente ao payload da Meta", async () => {
+    const h = createHarness();
+    const uploadPath = "whatsapp-uploads/atendente-1/12345678-1234-1234-1234-123456789abc";
+    h.storageObjects.set(uploadPath, {
+      buffer: Buffer.from("imagem"),
+      contentType: "image/png",
+      metadata: { fileName: "produto.png", caption: "Veja esta foto" }
+    });
+    h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+    h.documents.set(`cards/${appA.cardId}`, {
+      ...h.documents.get(`cards/${appA.cardId}`),
+      lastInboundAt: { toMillis: () => Date.now() }
+    });
+    const auth = { uid: "atendente-1", token: { email: "eamgfn4ever@gmail.com", name: "Samuel Cáceres" } };
+    await h.sendMessage({
+      auth,
+      data: {
+        cardId: appA.cardId, phoneNumberId: appA.phoneNumberId, mode: "media",
+        filePath: uploadPath, text: "Veja esta foto"
+      }
+    });
+
+    const upload = h.graphCalls.find((call) => call.path.endsWith("/media"));
+    const sent = h.graphCalls.find((call) => call.path.endsWith("/messages"));
+    assert.equal(upload.payload.messagingProduct, "whatsapp");
+    assert.equal(upload.payload.fileName, "produto.png");
+    assert.deepEqual(sent.payload.image, { id: "media-uploaded", caption: "Veja esta foto" });
+    assert.equal(JSON.stringify(sent.payload).includes("Samuel Cáceres"), false);
+    const stored = h.documents.get(`cards/${appA.cardId}/mensagensWhatsapp/wamid-outgoing`);
+    assert.equal(stored.type, "image");
+    assert.equal(stored.atendente.nome, "Samuel Cáceres");
+    assert.equal(h.storageObjects.has(uploadPath), false);
+    assert.ok(h.storageObjects.has(stored.mediaPath));
+    const history = await h.getMessages({ auth, data: { cardId: appA.cardId } });
+    assert.equal(history.messages[0].mimeType, "image/png");
+    assert.match(history.messages[0].mediaUrl, /whatsappMedia\?cardId=card-a/);
+});
+
+test("webhook baixa e guarda a imagem recebida junto com caption e tipo", async () => {
+    const h = createHarness();
+    h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+    const payload = messagePayload(appA, "wamid-image");
+    const message = payload.entry[0].changes[0].value.messages[0];
+    message.type = "image";
+    message.image = { id: "meta-media-id", mime_type: "image/jpeg", caption: "Produto recebido" };
+    delete message.text;
+    const result = await h.webhook({
+      route: `/${appA.id}`,
+      body: JSON.stringify(payload),
+      signingSecret: appA.secret
+    });
+    assert.equal(result.statusCode, 200, JSON.stringify(h.errors));
+    const stored = h.documents.get(`cards/${appA.cardId}/mensagensWhatsapp/wamid-image`);
+    assert.equal(stored.type, "image");
+    assert.equal(stored.text, "Produto recebido");
+    assert.equal(stored.caption, "Produto recebido");
+    assert.equal(stored.mimeType, "image/jpeg");
+    assert.ok(h.storageObjects.has(stored.mediaPath));
+    assert.equal(h.storageObjects.get(stored.mediaPath).buffer.toString(), "image-data");
+});
+
+test("endpoint de mídia rejeita requisições sem token de autenticação", async () => {
+    const h = createHarness();
+    const response = {
+      statusCode: undefined,
+      set() {},
+      sendStatus(code) { this.statusCode = code; }
+    };
+    await h.getMedia({ method: "GET", query: {}, get: () => "" }, response);
+    assert.equal(response.statusCode, 401);
 });
 
 test("atendimento humano impede outros usuários e pode ser liberado pelo administrador", async () => {
@@ -1374,11 +1559,104 @@ test("chat interno restringe participantes, deduplica envios e só notifica usu�
   assert.equal([...h.documents.keys()].filter((key) => key.startsWith("notificacoes/producao/itens/")).length, 1);
 });
 
+test("chat interno armazena anexos privados e libera mídia somente a participantes", async () => {
+  const h = createHarness();
+  const admin = { uid: "admin", token: { email: "eamgfn4ever@gmail.com" } };
+  const sales = { uid: "sales", token: { email: "vendas@example.test" } };
+  h.documents.set("solicitacoes/sales", { email: sales.token.email, status: "aprovada", cargo: "vendas" });
+  h.documents.set("solicitacoes/outsider", { email: "fora@example.test", status: "aprovada", cargo: "vendas" });
+  const { chatId } = await h.createChat({ auth: admin, data: { membros: ["sales"] } });
+  const filePath = "internal-chat-media/admin/00000000-0000-4000-8000-000000000001";
+  h.storageObjects.set(filePath, {
+    buffer: Buffer.from("imagem"),
+    contentType: "image/png",
+    metadata: {}
+  });
+  await h.sendChat({ auth: admin, data: {
+    chatId, texto: "", messageId: "mensagem-interna-midia-1234",
+    tipo: "image", filePath, fileName: "foto.png", mimeType: "image/png"
+  } });
+  await h.sendChat({ auth: admin, data: {
+    chatId, texto: "", messageId: "mensagem-interna-midia-1234",
+    tipo: "image", filePath, fileName: "foto.png", mimeType: "image/png"
+  } });
+  await assert.rejects(h.sendChat({ auth: admin, data: {
+    chatId, texto: "", messageId: "mensagem-interna-midia-invalida",
+    tipo: "image", filePath: "internal-chat-media/sales/00000000-0000-4000-8000-000000000002",
+    fileName: "foto.png", mimeType: "image/png"
+  } }), (error) => error.code === "invalid-argument");
+  const mensagens = await h.getChatMessages({ auth: sales, data: { chatId } });
+  assert.equal(mensagens.mensagens[0].tipo, "image");
+  assert.equal(mensagens.mensagens[0].fileName, "foto.png");
+  assert.match(mensagens.mensagens[0].mediaUrl, /internalChatMedia\?chatId=/);
+  const aviso = [...h.documents.entries()].find(([key]) => key.startsWith("notificacoes/sales/itens/"));
+  assert.equal(aviso[1].texto, "Imagem enviada");
+
+  const response = {
+    headers: {},
+    set(name, value) { this.headers[name] = value; return this; },
+    status(code) { this.statusCode = code; return this; },
+    sendStatus(code) { this.statusCode = code; },
+    end() { this.ended = true; }
+  };
+  const request = (token) => ({
+    method: "GET",
+    query: { chatId, messageId: "mensagem-interna-midia-1234" },
+    get(name) { return name.toLowerCase() === "authorization" ? token : ""; }
+  });
+  await h.getInternalChatMedia(request("Bearer valid-token"), response);
+  assert.equal(response.headers["Content-Type"], "image/png");
+  assert.match(response.headers["Content-Disposition"], /^inline;/);
+  assert.equal(response.body.toString(), "imagem");
+
+  const acessoNegado = {
+    headers: {},
+    set(name, value) { this.headers[name] = value; return this; },
+    status(code) { this.statusCode = code; return this; },
+    sendStatus(code) { this.statusCode = code; },
+    end() {}
+  };
+  await h.getInternalChatMedia(request("Bearer valid-outsider-token"), acessoNegado);
+  assert.equal(acessoNegado.statusCode, 403);
+
+  const negado = {
+    headers: {},
+    set(name, value) { this.headers[name] = value; return this; },
+    status(code) { this.statusCode = code; return this; },
+    sendStatus(code) { this.statusCode = code; },
+    end() {}
+  };
+  const semToken = request("");
+  semToken.get = () => "";
+  await h.getInternalChatMedia(semToken, negado);
+  assert.equal(negado.statusCode, 401);
+});
+
+test("lista membros aprovados válidos sem deixar um cadastro inválido bloquear os demais", async () => {
+  const h = createHarness();
+  const auth = { uid: "sales", token: { email: "vendas@example.test" } };
+  h.documents.set("solicitacoes/sales", { email: auth.token.email, status: "aprovada", cargo: "vendas" });
+  h.documents.set("solicitacoes/producao", { email: "producao@example.test", status: "aprovada", cargo: "producao" });
+  h.documents.set("solicitacoes/invalida", { email: "email-invalido", status: "aprovada" });
+  h.documents.set("solicitacoes/ausente", { email: "ausente@example.test", status: "aprovada" });
+  h.documents.set("solicitacoes/bloqueada", { email: "bloqueado@example.test", status: "bloqueada" });
+  h.failures.authByEmail = (email) => {
+    if (email === "email-invalido") throw Object.assign(new Error("E-mail inválido"), { code: "auth/invalid-email" });
+    if (email === "ausente@example.test") throw Object.assign(new Error("Conta não encontrada"), { code: "auth/user-not-found" });
+  };
+  const resultado = await h.listMembers({ auth, data: {} });
+  assert.equal(resultado.cadastrosSemConta, 2);
+  assert.equal(resultado.membros.map((membro) => membro.uid).sort().join(","), "admin,producao,sales");
+  assert.equal(h.warnings.length, 2);
+  h.failures.authByEmail = () => { throw Object.assign(new Error("Serviço indisponível"), { code: "auth/internal-error" }); };
+  await assert.rejects(h.listMembers({ auth, data: {} }), /Serviço indisponível/);
+});
+
 test("funcionário de outro setor acessa somente conversas da coluna autorizada", async () => {
   const h = createHarness();
   const auth = { uid: "producao", token: { email: "producao@example.test" } };
   h.documents.set("solicitacoes/producao", { email: auth.token.email, status: "aprovada", cargo: "producao" });
-  h.documents.set("notificacoesColunas/suporte", { destinatarios: [{ uid: auth.uid, email: auth.token.email }] });
+  h.documents.set("notificacoesColunas/suporte", { destinatarios: [null, { uid: auth.uid, email: auth.token.email }] });
   h.documents.set(`cards/${appA.cardId}`, {
     ...h.documents.get(`cards/${appA.cardId}`), colunaId: "suporte",
     lastInboundAt: { toMillis: () => Date.now() }

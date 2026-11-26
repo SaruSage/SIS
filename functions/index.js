@@ -5,6 +5,7 @@ const { SecretManagerServiceClient } = require("@google-cloud/secret-manager");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
+const { getStorage } = require("firebase-admin/storage");
 const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentWritten } = require("firebase-functions/v2/firestore");
@@ -25,9 +26,20 @@ const db = getFirestore();
 const REGION = "southamerica-east1";
 const GRAPH_API_VERSION = "v25.0";
 const META_GRAPH = "https://graph.facebook.com/" + GRAPH_API_VERSION;
+const mediaBucket = getStorage().bucket(
+  process.env.MEDIA_STORAGE_BUCKET ||
+  (process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT) + ".firebasestorage.app"
+);
 const ADMIN_EMAILS = ["eamgfn4ever@gmail.com"];
 const ALLOWED_SALES_ROLES = ["vendas", "administracao"];
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_MEDIA_BYTES = {
+  image: 5 * 1024 * 1024,
+  video: 16 * 1024 * 1024,
+  audio: 16 * 1024 * 1024,
+  document: 100 * 1024 * 1024,
+  sticker: 500 * 1024
+};
 // Longer than the webhook's 120-second execution timeout.
 const WEBHOOK_LOCK_MS = 5 * 60 * 1000;
 const secretManager = new SecretManagerServiceClient();
@@ -38,6 +50,80 @@ function normalizeEmail(email) {
 
 function normalizePhone(phone) {
   return String(phone || "").replace(/\D/g, "");
+}
+
+function validDisplayName(value) {
+  const name = String(value || "").trim();
+  return name && !name.includes("@") ? name : "";
+}
+
+function nomeLegivelDeEmail(email) {
+  const normalized = normalizeEmail(email);
+  if (normalized === "eamgfn4ever@gmail.com") return "Samuel Cáceres";
+  const localPart = normalized.split("@")[0]
+    .replace(/[._0-9-]+/g, " ")
+    .trim();
+  return localPart
+    ? localPart.split(/\s+/).map((parte) =>
+      parte.charAt(0).toLocaleUpperCase("pt-BR") + parte.slice(1).toLocaleLowerCase("pt-BR")
+    ).join(" ")
+    : "Atendente";
+}
+
+async function obterNomeAtendente(request) {
+  const auth = request.auth || {};
+  const token = auth.token || {};
+  const nomeToken = validDisplayName(token.name);
+  if (nomeToken && nomeToken !== auth.uid) return nomeToken;
+
+  const email = normalizeEmail(token.email);
+  if (auth.uid) {
+    const perfil = await db.collection("usuarios").doc(auth.uid).get();
+    const nomePerfil = perfil.exists && validDisplayName(perfil.data().nome);
+    if (nomePerfil) return nomePerfil;
+  }
+  if (email) {
+    const solicitacoes = await db.collection("solicitacoes")
+      .where("email", "==", email).get();
+    const cadastro = solicitacoes.docs.find((doc) =>
+      doc.data().status === "aprovada" && validDisplayName(doc.data().nome));
+    if (cadastro) return validDisplayName(cadastro.data().nome);
+  }
+  return nomeLegivelDeEmail(email);
+}
+
+function nomeExibicaoAtendente(atendente) {
+  if (!atendente) return "Equipe";
+  const nome = validDisplayName(atendente.nome);
+  if (nome && nome !== atendente.uid) return nome;
+  return nomeLegivelDeEmail(atendente.email);
+}
+
+function sanitizarNomeArquivo(value) {
+  const nome = String(value || "").split(/[\\/]/).pop()
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .trim()
+    .slice(0, 180);
+  return nome || "arquivo";
+}
+
+function tipoMidiaPara(mimeType) {
+  const mime = String(mimeType || "").split(";")[0].trim().toLowerCase();
+  if (mime === "image/webp") return "sticker";
+  if (["image/jpeg", "image/png"].includes(mime)) return "image";
+  if (["video/mp4", "video/3gpp"].includes(mime)) return "video";
+  if (["audio/aac", "audio/mp4", "audio/mpeg", "audio/amr", "audio/ogg"].includes(mime)) return "audio";
+  return "document";
+}
+
+function validarTamanhoMidia(tipo, tamanho) {
+  const limite = MAX_MEDIA_BYTES[tipo] || MAX_MEDIA_BYTES.document;
+  if (!Number.isSafeInteger(tamanho) || tamanho <= 0 || tamanho > limite) {
+    throw new HttpsError(
+      "invalid-argument",
+      "O arquivo excede o limite permitido para " + (tipo === "sticker" ? "figurinhas" : "este tipo de mídia") + "."
+    );
+  }
 }
 
 function isAdmin(request) {
@@ -94,7 +180,7 @@ async function obterAcessoConversas(request) {
     completo,
     colunas: configuracoes.docs.filter((doc) =>
       Array.isArray(doc.data().destinatarios) &&
-      doc.data().destinatarios.some((item) => item.uid === request.auth.uid && normalizeEmail(item.email) === email)
+      doc.data().destinatarios.some((item) => item && item.uid === request.auth.uid && normalizeEmail(item.email) === email)
     ).map((doc) => doc.id)
   };
 }
@@ -352,6 +438,62 @@ async function sendGraphMessage(number, recipient, message) {
   const messageId = response.messages && response.messages[0] && response.messages[0].id;
   if (!messageId) throw new Error("A Meta não retornou o identificador da mensagem enviada.");
   return messageId;
+}
+
+async function lerArquivoUpload(filePath, uid) {
+  const prefix = "whatsapp-uploads/" + uid + "/";
+  const nome = filePath.startsWith(prefix) ? filePath.slice(prefix.length) : "";
+  if (!/^[0-9a-f-]{36}$/i.test(nome)) {
+    throw new HttpsError("invalid-argument", "Selecione novamente o arquivo para anexar.");
+  }
+  const file = mediaBucket.file(filePath);
+  let metadata;
+  try {
+    [metadata] = await file.getMetadata();
+  } catch (erro) {
+    if (erro.code === 404) throw new HttpsError("not-found", "O arquivo anexado expirou. Selecione-o novamente.");
+    throw erro;
+  }
+  const mimeType = String(metadata.contentType || "application/octet-stream").split(";")[0].trim().toLowerCase();
+  const tipo = tipoMidiaPara(mimeType);
+  validarTamanhoMidia(tipo, Number(metadata.size));
+  const [buffer] = await file.download();
+  validarTamanhoMidia(tipo, buffer.length);
+  const custom = metadata.metadata || {};
+  return {
+    file,
+    buffer,
+    tipo,
+    mimeType,
+    fileName: sanitizarNomeArquivo(custom.fileName),
+    caption: String(custom.caption || "").trim()
+  };
+}
+
+async function enviarArquivoParaMeta(number, attachment) {
+  const accessToken = await readSecret(tokenSecretId(number.id), number.tokenVersion);
+  const form = new FormData();
+  form.set("messaging_product", "whatsapp");
+  form.set("type", attachment.mimeType);
+  form.set("file", new Blob([attachment.buffer], { type: attachment.mimeType }), attachment.fileName);
+  const response = await graphRequest(
+    META_GRAPH + "/" + number.id + "/media",
+    accessToken,
+    { method: "POST", body: form }
+  );
+  if (!response.id) throw new Error("A Meta não retornou o identificador da mídia enviada.");
+  return response.id;
+}
+
+function payloadMidia(mediaId, attachment) {
+  const item = { id: mediaId };
+  if (attachment.caption && ["image", "video", "document"].includes(attachment.tipo)) {
+    item.caption = attachment.caption;
+  } else if (attachment.caption) {
+    throw new HttpsError("invalid-argument", "Este tipo de arquivo não aceita legenda.");
+  }
+  if (attachment.tipo === "document") item.filename = attachment.fileName;
+  return { type: attachment.tipo, [attachment.tipo]: item };
 }
 
 async function getFirstColumn() {
@@ -990,7 +1132,11 @@ exports.sendWhatsAppMessage = onCall({ region: REGION, timeoutSeconds: 120 }, as
   const acesso = await autorizarConversa(request, data.cardId);
   const phoneNumberId = String(data.phoneNumberId || "");
   const number = await loadActiveNumber(phoneNumberId);
-  const payload = montarPayloadMensagem(data);
+  const isMedia = data.mode === "media";
+  let payload = isMedia ? null : montarPayloadMensagem(data);
+  if (isMedia && !data.cardId) {
+    throw new HttpsError("invalid-argument", "Abra uma conversa existente para enviar um arquivo.");
+  }
   const cardId = String(data.cardId || "");
   const phone = normalizePhone(data.telefone || data.phone || "");
   let card = null;
@@ -1014,17 +1160,55 @@ exports.sendWhatsAppMessage = onCall({ region: REGION, timeoutSeconds: 120 }, as
   if (!/^\d{8,15}$/.test(recipient)) {
     throw new HttpsError("invalid-argument", "Informe um telefone com código do país e DDD.");
   }
-  await assertTextWindow(card, payload.type === "template" ? "template" : "text");
+  await assertTextWindow(card, !isMedia && payload.type === "template" ? "template" : "text");
+  let attachment = null;
+  if (isMedia) {
+    attachment = await lerArquivoUpload(String(data.filePath || ""), request.auth.uid);
+    if (attachment.caption.length > 1024) {
+      throw new HttpsError("invalid-argument", "A legenda do arquivo aceita no máximo 1024 caracteres.");
+    }
+    if (attachment.caption && !["image", "video", "document"].includes(attachment.tipo)) {
+      throw new HttpsError("invalid-argument", "Este tipo de arquivo não aceita legenda.");
+    }
+  }
 
   let firstColumn = null;
   if (!card) firstColumn = await getFirstColumn();
   let apiMessageId;
+  let mediaPath = "";
+  const attendantName = await obterNomeAtendente(request);
   try {
+    if (attachment) {
+      const mediaId = await enviarArquivoParaMeta(number, attachment);
+      payload = payloadMidia(mediaId, attachment);
+      mediaPath = "whatsapp-media/" + number.id + "/" + crypto.randomUUID();
+      await mediaBucket.file(mediaPath).save(attachment.buffer, {
+        metadata: {
+          contentType: attachment.mimeType,
+          metadata: { fileName: attachment.fileName, caption: attachment.caption }
+        }
+      });
+    }
     apiMessageId = await sendGraphMessage(number, recipient, payload);
   } catch (erro) {
+    if (mediaPath) {
+      try {
+        await mediaBucket.file(mediaPath).delete();
+      } catch (cleanupError) {
+        console.warn("Não foi possível limpar mídia de uma tentativa de envio falha.", cleanupError.message);
+      }
+    }
+    if (erro instanceof HttpsError) throw erro;
     throw new HttpsError("failed-precondition", erro.message);
   }
   const enviadoEm = Timestamp.fromMillis(Date.now());
+  if (attachment) {
+    try {
+      await attachment.file.delete();
+    } catch (erro) {
+      console.warn("Não foi possível limpar o upload temporário do WhatsApp.", erro.message);
+    }
+  }
 
   if (!card) {
     const now = FieldValue.serverTimestamp();
@@ -1051,24 +1235,35 @@ exports.sendWhatsAppMessage = onCall({ region: REGION, timeoutSeconds: 120 }, as
       timestamp: FieldValue.serverTimestamp()
     });
   }
+  const preview = attachment
+    ? attachment.caption || attachment.fileName
+    : payload.type === "text"
+      ? payload.text.body
+      : payload.type === "template" ? "Modelo: " + payload.template.name : "[" + payload.type + "]";
   await recordMessage(cardRef.id, {
     direction: "outgoing",
     type: payload.type,
-    text: payload.type === "text" ? payload.text.body : "Modelo: " + payload.template.name,
+    text: preview,
+    ...(attachment ? {
+      mimeType: attachment.mimeType,
+      fileName: attachment.fileName,
+      caption: attachment.caption,
+      mediaPath
+    } : {}),
     apiMessageId,
     status: "sent",
     phoneNumberId: number.id,
     automatico: false,
     atendente: {
       uid: request.auth.uid,
-      nome: request.auth.token.name || request.auth.token.email || request.auth.uid
+      nome: attendantName
     }
   }, apiMessageId);
   await atualizarCardComPrevia(cardRef, {
     whatsappPhoneNumberId: number.id,
     ultimaAtividade: FieldValue.serverTimestamp(),
     whatsappLastOutboundAt: FieldValue.serverTimestamp()
-  }, payload.type === "text" ? payload.text.body : "Modelo: " + payload.template.name, enviadoEm);
+  }, preview, enviadoEm);
   return { success: true, cardId: cardRef.id, apiMessageId };
 });
 
@@ -1139,6 +1334,23 @@ async function atualizarCardComPrevia(ref, alteracoes, texto, enviadoEm) {
   });
 }
 
+async function resolverNomeAtendenteSalvo(uid) {
+  try {
+    const conta = await getAuth().getUser(uid);
+    return await obterNomeAtendente({
+      auth: {
+        uid: conta.uid,
+        token: { email: conta.email || "", name: conta.displayName || "" }
+      }
+    });
+  } catch (erro) {
+    if (erro.code !== "auth/user-not-found") {
+      console.warn("Não foi possível resolver o nome do atendente da mensagem.", erro.message);
+    }
+    return "Atendente";
+  }
+}
+
 exports.getWhatsAppMessages = onCall({ region: REGION }, async (request) => {
   const cardId = String((request.data || {}).cardId || "");
   await autorizarConversa(request, cardId);
@@ -1146,20 +1358,138 @@ exports.getWhatsAppMessages = onCall({ region: REGION }, async (request) => {
   if (!cardSnapshot.exists) throw new HttpsError("not-found", "Conversa não encontrada.");
   const snapshot = await db.collection("cards").doc(cardId)
     .collection("mensagensWhatsapp").orderBy("criadoEm", "desc").get();
-  return {
-    messages: snapshot.docs.map((documento) => {
-      const dados = documento.data();
-      return {
-        id: documento.id,
-        direction: dados.direction || "incoming",
-        type: dados.type || "text",
-        text: dados.text || "",
-        status: dados.status || "",
-        atendente: dados.atendente || null,
-        timestamp: dados.criadoEm && dados.criadoEm.toMillis ? dados.criadoEm.toMillis() : null
+  const nomesAtendentes = new Map();
+  const historico = await Promise.all(snapshot.docs.map(async (documento) => {
+    const dados = documento.data();
+    let atendente = null;
+    if (dados.atendente) {
+      atendente = {
+        uid: dados.atendente.uid || "",
+        nome: nomeExibicaoAtendente(dados.atendente)
       };
-    }).reverse()
+      if (dados.atendente.uid &&
+          (!validDisplayName(dados.atendente.nome) || dados.atendente.nome === dados.atendente.uid)) {
+        if (!nomesAtendentes.has(dados.atendente.uid)) {
+          nomesAtendentes.set(dados.atendente.uid, resolverNomeAtendenteSalvo(dados.atendente.uid));
+        }
+        atendente.nome = await nomesAtendentes.get(dados.atendente.uid);
+      }
+    }
+    return {
+      id: documento.id,
+      direction: dados.direction || "incoming",
+      type: dados.type || "text",
+      text: dados.text || "",
+      status: dados.status || "",
+      atendente,
+      timestamp: dados.criadoEm && dados.criadoEm.toMillis ? dados.criadoEm.toMillis() : null,
+      mimeType: dados.mimeType || "",
+      fileName: dados.fileName || "",
+      caption: dados.caption || "",
+      location: dados.location || null,
+      contacts: Array.isArray(dados.contacts) ? dados.contacts : [],
+      details: dados.details || null,
+      mediaUrl: dados.mediaPath
+        ? "https://" + REGION + "-" + (process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT) +
+          ".cloudfunctions.net/whatsappMedia?cardId=" + encodeURIComponent(cardId) +
+          "&messageId=" + encodeURIComponent(documento.id)
+        : "",
+      mediaError: dados.mediaError || ""
+    };
+  }));
+  return {
+    messages: historico.reverse()
   };
+});
+
+exports.whatsappMedia = onRequest({ region: REGION, cors: true, timeoutSeconds: 120 }, async (request, response) => {
+  if (request.method !== "GET") {
+    response.set("Allow", "GET");
+    response.sendStatus(405);
+    return;
+  }
+  const authorization = String(request.get("authorization") || "");
+  const tokenMatch = /^Bearer\s+(.+)$/i.exec(authorization);
+  if (!tokenMatch) {
+    response.sendStatus(401);
+    return;
+  }
+  const cardId = String(request.query.cardId || "");
+  const messageId = String(request.query.messageId || "");
+  if (!cardId || cardId.includes("/") || !messageId || messageId.includes("/")) {
+    response.sendStatus(400);
+    return;
+  }
+  try {
+    const decoded = await getAuth().verifyIdToken(tokenMatch[1]);
+    await autorizarConversa({ auth: { uid: decoded.uid, token: decoded } }, cardId);
+    const message = await db.collection("cards").doc(cardId)
+      .collection("mensagensWhatsapp").doc(messageId).get();
+    const mediaPath = message.exists && message.data().mediaPath;
+    if (typeof mediaPath !== "string" || !mediaPath.startsWith("whatsapp-media/")) {
+      response.sendStatus(404);
+      return;
+    }
+    const file = mediaBucket.file(mediaPath);
+    const [metadata] = await file.getMetadata();
+    const size = Number(metadata.size);
+    const mimeType = String(message.data().mimeType || metadata.contentType || "application/octet-stream")
+      .split(";")[0].trim();
+    const range = String(request.get("range") || "");
+    let options = {};
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      if (!match || (!match[1] && !match[2])) {
+        response.set("Content-Range", "bytes */" + size);
+        response.sendStatus(416);
+        return;
+      }
+      const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+      const end = match[2] && match[1] ? Math.min(size - 1, Number(match[2])) : size - 1;
+      if (start > end || start >= size) {
+        response.set("Content-Range", "bytes */" + size);
+        response.sendStatus(416);
+        return;
+      }
+      options = { start, end };
+      response.status(206);
+      response.set("Content-Range", "bytes " + start + "-" + end + "/" + size);
+      response.set("Content-Length", String(end - start + 1));
+    } else {
+      response.set("Content-Length", String(size));
+    }
+    const fileName = sanitizarNomeArquivo(message.data().fileName || "arquivo")
+      .replace(/["\\]/g, "_");
+    const fileNameFallback = fileName.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^\w.-]/g, "_");
+    const inline = /^(image\/(jpeg|png|webp)|video\/(mp4|3gpp)|audio\/)/i.test(mimeType);
+    response.set("Content-Type", mimeType);
+    response.set("Content-Disposition", (inline ? "inline" : "attachment") +
+      '; filename="' + fileNameFallback + '"; filename*=UTF-8\'\'' + encodeURIComponent(fileName));
+    response.set("Cache-Control", "private, no-store");
+    response.set("Accept-Ranges", "bytes");
+    const stream = file.createReadStream(options);
+    stream.on("error", (erro) => {
+      console.error("Falha ao transmitir mídia WhatsApp:", erro.message);
+      if (!response.headersSent) response.status(500).end();
+    });
+    stream.pipe(response);
+  } catch (erro) {
+    if (erro.code === 404 || erro.code === "storage/object-not-found") {
+      response.sendStatus(404);
+      return;
+    }
+    if (erro.code === "permission-denied") {
+      response.sendStatus(403);
+      return;
+    }
+    if (String(erro.code || "").startsWith("auth/")) {
+      response.sendStatus(401);
+      return;
+    }
+    console.error("Falha ao carregar mídia WhatsApp:", erro.message);
+    response.sendStatus(500);
+  }
 });
 
 exports.contarNaoLidasWhatsApp = onCall({ region: REGION }, async (request) => {
@@ -1408,19 +1738,21 @@ exports.listarMembrosChat = onCall({ region: REGION }, async (request) => {
     if (email && dados.status === "aprovada") nomes.set(email, dados.nome || email);
   });
   ADMIN_EMAILS.forEach((email) => { if (!nomes.has(email)) nomes.set(email, email); });
+  let cadastrosSemConta = 0;
   const membros = await Promise.all([...nomes.entries()].map(async ([email, nome]) => {
     try {
       const user = await getAuth().getUserByEmail(email);
       return user.disabled ? null : { uid: user.uid, nome: user.displayName || nome, email };
     } catch (erro) {
-      if (erro.code === "auth/user-not-found") {
-        console.warn("Conta aprovada não encontrada ao listar contatos internos.", { email });
+      if (erro.code === "auth/user-not-found" || erro.code === "auth/invalid-email") {
+        cadastrosSemConta++;
+        console.warn("Cadastro aprovado sem conta válida ao listar contatos internos.", { code: erro.code });
         return null;
       }
       throw erro;
     }
   }));
-  return { membros: membros.filter(Boolean) };
+  return { membros: membros.filter(Boolean), cadastrosSemConta };
 });
 
 exports.criarChatInterno = onCall({ region: REGION }, async (request) => {
@@ -1498,10 +1830,118 @@ exports.obterMensagensChatInterno = onCall({ region: REGION }, async (request) =
   await assertChatMember(request);
   const { ref } = await chatPermitido((request.data || {}).chatId, request.auth.uid);
   const snapshot = await ref.collection("mensagens").orderBy("criadoEm", "asc").get();
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
   return { mensagens: snapshot.docs.map((doc) => {
     const dados = doc.data();
-    return { id: doc.id, uid: dados.uid, nome: dados.nome, texto: dados.texto, criadoEm: timestampMillis(dados.criadoEm) };
+    return {
+      id: doc.id, uid: dados.uid, nome: dados.nome, texto: dados.texto || "",
+      tipo: dados.tipo || "text", fileName: dados.fileName || "",
+      caption: dados.caption || "", mimeType: dados.mimeType || "",
+      criadoEm: timestampMillis(dados.criadoEm),
+      mediaUrl: dados.mediaPath
+        ? `https://${REGION}-${projectId}.cloudfunctions.net/internalChatMedia?chatId=${encodeURIComponent((request.data || {}).chatId)}&messageId=${encodeURIComponent(doc.id)}`
+        : ""
+    };
   }) };
+});
+
+exports.internalChatMedia = onRequest({ region: REGION, cors: true, timeoutSeconds: 120 }, async (request, response) => {
+  if (request.method !== "GET") {
+    response.set("Allow", "GET");
+    response.sendStatus(405);
+    return;
+  }
+  const authorization = String(request.get("authorization") || "");
+  const tokenMatch = /^Bearer\s+(.+)$/i.exec(authorization);
+  if (!tokenMatch) {
+    response.sendStatus(401);
+    return;
+  }
+  const chatId = String(request.query.chatId || "");
+  const messageId = String(request.query.messageId || "");
+  if (!chatId || chatId.includes("/") || !messageId || messageId.includes("/")) {
+    response.sendStatus(400);
+    return;
+  }
+  try {
+    const decoded = await getAuth().verifyIdToken(tokenMatch[1]);
+    const caller = { auth: { uid: decoded.uid, token: decoded } };
+    await assertChatMember(caller);
+    const { ref } = await chatPermitido(chatId, decoded.uid);
+    const message = await ref.collection("mensagens").doc(messageId).get();
+    if (!message.exists) {
+      response.sendStatus(404);
+      return;
+    }
+    const dados = message.data();
+    const mediaPath = dados.mediaPath;
+    const mediaPrefix = `internal-chat-media/${dados.uid}/`;
+    const mediaName = typeof mediaPath === "string" && mediaPath.startsWith(mediaPrefix)
+      ? mediaPath.slice(mediaPrefix.length)
+      : "";
+    if (!/^[a-fA-F0-9-]{36}$/.test(mediaName)) {
+      response.sendStatus(404);
+      return;
+    }
+    const file = mediaBucket.file(mediaPath);
+    const [metadata] = await file.getMetadata();
+    const size = Number(metadata.size);
+    const mimeType = String(dados.mimeType || metadata.contentType || "application/octet-stream")
+      .split(";")[0].trim();
+    const range = String(request.get("range") || "");
+    let options = {};
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      if (!match || (!match[1] && !match[2])) {
+        response.set("Content-Range", "bytes */" + size);
+        response.sendStatus(416);
+        return;
+      }
+      const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+      const end = match[2] && match[1] ? Math.min(size - 1, Number(match[2])) : size - 1;
+      if (start > end || start >= size) {
+        response.set("Content-Range", "bytes */" + size);
+        response.sendStatus(416);
+        return;
+      }
+      options = { start, end };
+      response.status(206);
+      response.set("Content-Range", "bytes " + start + "-" + end + "/" + size);
+      response.set("Content-Length", String(end - start + 1));
+    } else {
+      response.set("Content-Length", String(size));
+    }
+    const fileName = String(dados.fileName || "arquivo").replace(/[\u0000-\u001f\u007f]/g, "_").slice(0, 180);
+    const fileNameFallback = fileName.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^\w.-]/g, "_").replace(/["\\]/g, "_");
+    const inline = /^(image\/(jpeg|png|webp)|video\/(mp4|3gpp)|audio\/)/i.test(mimeType);
+    response.set("Content-Type", mimeType);
+    response.set("Content-Disposition", (inline ? "inline" : "attachment") +
+      '; filename="' + fileNameFallback + '"; filename*=UTF-8\'\'' + encodeURIComponent(fileName));
+    response.set("Cache-Control", "private, no-store");
+    response.set("Accept-Ranges", "bytes");
+    const stream = file.createReadStream(options);
+    stream.on("error", (erro) => {
+      console.error("Falha ao transmitir mídia de chat interno:", erro.message);
+      if (!response.headersSent) response.status(500).end();
+    });
+    stream.pipe(response);
+  } catch (erro) {
+    if (erro.code === 404 || erro.code === "storage/object-not-found") {
+      response.sendStatus(404);
+      return;
+    }
+    if (erro.code === "permission-denied") {
+      response.sendStatus(403);
+      return;
+    }
+    if (String(erro.code || "").startsWith("auth/")) {
+      response.sendStatus(401);
+      return;
+    }
+    console.error("Falha ao carregar mídia de chat interno:", erro.message);
+    response.sendStatus(500);
+  }
 });
 
 exports.presencaChatInterno = onCall({ region: REGION }, async (request) => {
@@ -1522,11 +1962,60 @@ exports.enviarMensagemChatInterno = onCall({ region: REGION }, async (request) =
   await assertChatMember(request);
   const dados = request.data || {};
   const texto = typeof dados.texto === "string" ? dados.texto.trim() : "";
-  if (!texto || texto.length > 4096 || typeof dados.messageId !== "string" ||
+  const tipo = typeof dados.tipo === "string" ? dados.tipo : "text";
+  const tiposMidia = ["image", "video", "audio", "document", "sticker"];
+  const temMidia = tiposMidia.includes(tipo);
+  if ((!texto && !temMidia) || texto.length > 4096 || typeof dados.messageId !== "string" ||
       !/^[a-zA-Z0-9-]{16,80}$/.test(dados.messageId)) {
     throw new HttpsError("invalid-argument", "Informe uma mensagem válida.");
   }
+  if (tipo !== "text" && !temMidia) {
+    throw new HttpsError("invalid-argument", "Tipo de anexo inválido.");
+  }
   const { ref, dados: chatInicial } = await chatPermitido(dados.chatId, request.auth.uid);
+  let anexo = null;
+  if (temMidia) {
+    const filePath = typeof dados.filePath === "string" ? dados.filePath : "";
+    const fileName = typeof dados.fileName === "string" ? dados.fileName.trim() : "";
+    const mimeType = typeof dados.mimeType === "string" ? dados.mimeType.split(";")[0].trim().toLowerCase() : "";
+    const prefixo = `internal-chat-media/${request.auth.uid}/`;
+    const fileId = filePath.startsWith(prefixo) ? filePath.slice(prefixo.length) : "";
+    const mimePorTipo = {
+      image: /^image\/(jpeg|png)$/,
+      video: /^video\/(mp4|3gpp)$/,
+      audio: /^audio\/(aac|mp4|mpeg|amr|ogg)$/,
+      sticker: /^image\/webp$/
+    };
+    const mimeValido = tipo === "document"
+      ? /^[a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+$/.test(mimeType)
+      : mimePorTipo[tipo].test(mimeType);
+    if (!/^[a-fA-F0-9-]{36}$/.test(fileId) || !fileName || fileName.length > 180 ||
+        !mimeValido || !MAX_MEDIA_BYTES[tipo]) {
+      throw new HttpsError("invalid-argument", "O anexo não é válido.");
+    }
+    let metadata;
+    try {
+      [metadata] = await mediaBucket.file(filePath).getMetadata();
+    } catch (erro) {
+      if (erro.code === 404 || erro.code === "storage/object-not-found") {
+        throw new HttpsError("invalid-argument", "O arquivo anexado não foi encontrado.");
+      }
+      throw erro;
+    }
+    const tamanho = Number(metadata.size);
+    const contentType = String(metadata.contentType || "").split(";")[0].trim().toLowerCase();
+    if (!Number.isSafeInteger(tamanho) || tamanho <= 0 || tamanho > MAX_MEDIA_BYTES[tipo] ||
+        contentType !== mimeType) {
+      throw new HttpsError("invalid-argument", "O tamanho ou formato do anexo não é permitido.");
+    }
+    anexo = {
+      mediaPath: filePath,
+      fileName: fileName.replace(/[\/\\\u0000-\u001f\u007f]/g, "_"),
+      mimeType
+    };
+  } else if (dados.filePath || dados.fileName || dados.mimeType) {
+    throw new HttpsError("invalid-argument", "Dados de anexo incompatíveis com uma mensagem de texto.");
+  }
   const outros = chatInicial.membros.filter((uid) => uid !== request.auth.uid);
   const [contas, cadastros] = await Promise.all([
     Promise.all(outros.map(async (uid) => {
@@ -1547,6 +2036,13 @@ exports.enviarMensagemChatInterno = onCall({ region: REGION }, async (request) =
     return ADMIN_EMAILS.includes(email) || cadastros.docs.some((doc) =>
       normalizeEmail(doc.data().email) === email && doc.data().status === "aprovada");
   }).map((conta) => conta.uid));
+  const resumo = texto || ({
+    image: "Imagem enviada",
+    video: "Vídeo enviado",
+    audio: "Áudio enviado",
+    sticker: "Figurinha enviada",
+    document: "Arquivo: " + anexo.fileName
+  }[tipo]);
   await db.runTransaction(async (transaction) => {
     const chat = await transaction.get(ref);
     if (!chat.exists || !chat.data().membros.includes(request.auth.uid)) {
@@ -1555,7 +2051,12 @@ exports.enviarMensagemChatInterno = onCall({ region: REGION }, async (request) =
     const mensagem = ref.collection("mensagens").doc(dados.messageId);
     const anterior = await transaction.get(mensagem);
     if (anterior.exists) {
-      if (anterior.data().uid !== request.auth.uid || anterior.data().texto !== texto) {
+      const dadoAnterior = anterior.data();
+      if (dadoAnterior.uid !== request.auth.uid || dadoAnterior.texto !== texto ||
+          (dadoAnterior.tipo || "text") !== tipo ||
+          (dadoAnterior.mediaPath || "") !== (anexo ? anexo.mediaPath : "") ||
+          (dadoAnterior.fileName || "") !== (anexo ? anexo.fileName : "") ||
+          (dadoAnterior.mimeType || "") !== (anexo ? anexo.mimeType : "")) {
         throw new HttpsError("already-exists", "Identificador de mensagem já utilizado.");
       }
       return;
@@ -1564,8 +2065,13 @@ exports.enviarMensagemChatInterno = onCall({ region: REGION }, async (request) =
     const presencas = await Promise.all(destinatarios.map((uid) =>
       transaction.get(db.collection("presencasChats").doc(uid).collection("sessoes"))));
     const nome = chat.data().nomes[request.auth.uid] || request.auth.token.name || request.auth.token.email || request.auth.uid;
-    transaction.set(mensagem, { uid: request.auth.uid, nome, texto, criadoEm: FieldValue.serverTimestamp() });
-    transaction.update(ref, { ultimaMensagem: texto.slice(0, 300), ultimaAtividade: FieldValue.serverTimestamp() });
+    transaction.set(mensagem, {
+      uid: request.auth.uid, nome, texto, tipo,
+      ...(anexo || {}),
+      ...(anexo ? { caption: texto } : {}),
+      criadoEm: FieldValue.serverTimestamp()
+    });
+    transaction.update(ref, { ultimaMensagem: resumo.slice(0, 300), ultimaAtividade: FieldValue.serverTimestamp() });
     destinatarios.forEach((uid, index) => {
       const ativo = presencas[index].docs.some((sessao) =>
         sessao.data().chatId === dados.chatId &&
@@ -1576,12 +2082,114 @@ exports.enviarMensagemChatInterno = onCall({ region: REGION }, async (request) =
       transaction.set(notification, {
         tipo: "interna", chatId: dados.chatId,
         nome: chat.data().grupo ? chat.data().nome : nome,
-        texto, criadoEm: FieldValue.serverTimestamp(), lida: false
+        texto: resumo, criadoEm: FieldValue.serverTimestamp(), lida: false
       });
     });
   });
   return { success: true };
 });
+
+function conteudoMensagemRecebida(message) {
+  const type = String(message.type || "text");
+  const media = ["image", "audio", "video", "document", "sticker"].includes(type)
+    ? message[type] || {}
+    : null;
+  const caption = String(media && media.caption || "").trim();
+  const interactive = message.interactive || {};
+  const location = message.location ? {
+    latitude: Number(message.location.latitude),
+    longitude: Number(message.location.longitude),
+    name: String(message.location.name || ""),
+    address: String(message.location.address || ""),
+    url: String(message.location.url || "")
+  } : null;
+  const contacts = Array.isArray(message.contacts) ? message.contacts.map((contact) => ({
+    name: String(contact.name && contact.name.formatted_name || "Contato"),
+    phones: (Array.isArray(contact.phones) ? contact.phones : [])
+      .map((phone) => String(phone.phone || phone.wa_id || "")).filter(Boolean)
+  })) : [];
+  const details = type === "interactive"
+    ? {
+      title: String(interactive.button_reply && interactive.button_reply.title ||
+        interactive.list_reply && interactive.list_reply.title || "")
+    }
+    : type === "button" ? { title: String(message.button && message.button.text || "") }
+      : type === "reaction" ? { emoji: String(message.reaction && message.reaction.emoji || "") }
+        : type === "order" ? { catalogId: String(message.order && message.order.catalog_id || "") }
+          : null;
+  let text = message.text && message.text.body || caption;
+  if (!text && location) {
+    text = "Localização: " + (location.name || location.address ||
+      location.latitude + ", " + location.longitude);
+  }
+  if (!text && contacts.length) text = "Contato: " + contacts[0].name;
+  if (!text && details && details.title) text = details.title;
+  if (!text && details && details.emoji) text = details.emoji;
+  if (!text && type === "image") text = "[Imagem recebida]";
+  if (!text && type === "audio") text = "[Áudio recebido]";
+  if (!text && type === "video") text = "[Vídeo recebido]";
+  if (!text && type === "document") text = "[Documento recebido]";
+  if (!text && type === "sticker") text = "[Figurinha recebida]";
+  if (!text) text = "[Mensagem " + type + "]";
+  return {
+    type,
+    text,
+    mimeType: String(media && media.mime_type || ""),
+    fileName: sanitizarNomeArquivo(media && media.filename),
+    caption,
+    location,
+    contacts,
+    details,
+    mediaId: String(media && media.id || "")
+  };
+}
+
+async function capturarMidiaRecebida(numberId, numberData, message, content) {
+  if (!content.mediaId) {
+    if (["image", "audio", "video", "document", "sticker"].includes(content.type)) {
+      return { mediaError: "A Meta não forneceu o arquivo desta mensagem." };
+    }
+    return {};
+  }
+  const mediaToken = await readSecret(tokenSecretId(numberId), numberData.tokenVersion);
+  const metadata = await graphRequest(
+    META_GRAPH + "/" + encodeURIComponent(content.mediaId),
+    mediaToken
+  );
+  const mimeType = String(metadata.mime_type || content.mimeType || "application/octet-stream")
+    .split(";")[0].trim().toLowerCase();
+  const tipo = content.type === "sticker" ? "sticker" : tipoMidiaPara(mimeType);
+  const tamanhoDeclarado = Number(metadata.file_size || 0);
+  if (tamanhoDeclarado > MAX_MEDIA_BYTES[tipo]) {
+    return { mimeType, mediaError: "O arquivo recebido excede o limite de exibição." };
+  }
+  const mediaUrl = new URL(String(metadata.url || ""));
+  if (mediaUrl.protocol !== "https:" ||
+      !["lookaside.fbsbx.com", "graph.facebook.com"].includes(mediaUrl.hostname)) {
+    throw new Error("A Meta retornou um endereço de mídia inválido.");
+  }
+  const response = await fetch(mediaUrl.toString(), {
+    headers: { Authorization: "Bearer " + mediaToken },
+    signal: AbortSignal.timeout(20000)
+  });
+  if (!response.ok) throw new Error("A Meta recusou o download da mídia recebida.");
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (!buffer.length || buffer.length > MAX_MEDIA_BYTES[tipo]) {
+    return { mimeType, mediaError: "O arquivo recebido excede o limite de exibição." };
+  }
+  const fileName = content.fileName === "arquivo"
+    ? "whatsapp-" + content.type + (mimeType === "image/webp" ? ".webp" : "")
+    : content.fileName;
+  const mediaPath = "whatsapp-media/" + numberId + "/" +
+    crypto.createHash("sha256").update(message.id).digest("hex");
+  await mediaBucket.file(mediaPath).save(buffer, {
+    metadata: {
+      contentType: mimeType,
+      metadata: { fileName, caption: content.caption }
+    }
+  });
+  return { mediaPath, mimeType, fileName };
+}
 
 async function handleInboundMessage(numberId, message, contact, numberData) {
   const sender = normalizePhone(message.from);
@@ -1589,13 +2197,8 @@ async function handleInboundMessage(numberId, message, contact, numberData) {
   const receivedDate = message.timestamp ? new Date(Number(message.timestamp) * 1000) : new Date();
   const receivedAt = Timestamp.fromDate(Number.isNaN(receivedDate.getTime()) ? new Date() : receivedDate);
   const receivedAtMs = receivedAt.toMillis();
-  const messageText = message.text && message.text.body
-    ? message.text.body
-    : message.type === "image" ? "[Imagem recebida]"
-      : message.type === "audio" ? "[Áudio recebido]"
-        : message.type === "video" ? "[Vídeo recebido]"
-          : message.type === "document" ? "[Documento recebido]"
-            : "[Mensagem " + String(message.type || "recebida") + "]";
+  const content = conteudoMensagemRecebida(message);
+  const messageText = content.text;
   const activeBotMessage = Array.isArray(numberData.botMessages)
     ? numberData.botMessages.find((item) => item && item.id === numberData.activeBotMessageId)
     : null;
@@ -1635,6 +2238,7 @@ async function handleInboundMessage(numberId, message, contact, numberData) {
   if (claim === "busy") throw new Error("Evento WhatsApp já está em processamento.");
 
   try {
+    const capturedMedia = await capturarMidiaRecebida(numberId, numberData, message, content);
     const candidates = await db.collection("cards")
       .where("whatsappPhoneNumberId", "==", numberId).get();
     const candidate = candidates.docs.find((documento) =>
@@ -1800,8 +2404,16 @@ async function handleInboundMessage(numberId, message, contact, numberData) {
       }
       transaction.set(ref.collection("mensagensWhatsapp").doc(message.id), {
         direction: "incoming",
-        type: message.type || "text",
+        type: content.type,
         text: messageText,
+        mimeType: capturedMedia.mimeType || content.mimeType,
+        fileName: capturedMedia.fileName || content.fileName,
+        caption: content.caption,
+        location: content.location,
+        contacts: content.contacts,
+        details: content.details,
+        mediaPath: capturedMedia.mediaPath || "",
+        mediaError: capturedMedia.mediaError || "",
         apiMessageId: message.id,
         phoneNumberId: numberId,
         status: "received",

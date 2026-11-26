@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/whatsapp.css">
   <link rel="stylesheet" href="css/conversas.css">
 </head>
-<body>
+<body class="pagina-chats-internos">
 <div id="conteudo-protegido" class="oculto">
   <div class="app-shell">
     <aside class="sidebar">
@@ -55,9 +55,11 @@
           </details>
           <div class="fila-listagens">
             <h3>Conversas e grupos</h3>
+            <p id="chats-erro" class="lista-erro" role="status" hidden></p>
             <div id="chats-lista" class="conversas-lista">Carregando...</div>
             <h3>Funcionários</h3>
-            <div id="membros-lista" class="conversas-lista"></div>
+            <p id="membros-erro" class="lista-erro" role="status" hidden></p>
+            <div id="membros-lista" class="conversas-lista">Carregando...</div>
           </div>
         </section>
         <section class="conversas-painel" aria-label="Chat selecionado">
@@ -70,9 +72,16 @@
             </div>
             <div id="historico-chat" class="whatsapp-conversa-lista" aria-live="polite"></div>
             <form id="form-chat" class="whatsapp-conversa-form">
+              <input id="chat-arquivo-input" class="arquivo-input" type="file" tabindex="-1" accept="image/*,video/mp4,video/3gpp,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt">
+              <p id="chat-arquivo-selecionado" class="arquivo-selecionado" role="status" hidden></p>
               <div class="compositor">
-                <label><span class="sr-only">Mensagem</span><textarea id="texto-chat" rows="1" maxlength="4096" placeholder="Digite uma mensagem..." required></textarea></label>
-                <button type="submit" class="botao-primario">Enviar <span aria-hidden="true">➤</span></button>
+                <label><span class="sr-only">Mensagem</span><textarea id="texto-chat" rows="1" maxlength="4096" placeholder="Digite uma mensagem..."></textarea></label>
+                <button id="chat-anexar-arquivo" type="button" class="botao-anexo" aria-label="Anexar arquivo" title="Anexar arquivo">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 12.5 7.8-7.8a3.5 3.5 0 0 1 5 5l-9.9 9.9a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2"/></svg>
+                </button>
+                <button id="chat-enviar" type="submit" class="botao-primario compositor-enviar" aria-label="Enviar mensagem" title="Enviar mensagem">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                </button>
               </div>
             </form>
           </div>

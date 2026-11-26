@@ -2,11 +2,14 @@ import { auth, db, functions } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, addDoc, getDocs, onSnapshot, query, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+import { getStorage, ref, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import { iniciarLayoutBase, aplicarPermissoesSidebar, obterDadosUsuario, atualizarCabecalhoUsuario } from "./layout-base.js";
-import { inicial, criarItemConversa, criarMensagem } from "./conversas-ui.mjs";
+import { inicial, criarItemConversa, criarMensagem, classificarArquivo, ehAtalhoEnviar, deveRolarAoFim, formatarTempoRestante } from "./conversas-ui.mjs";
+import { descreverErroServico } from "./erros-servico.mjs";
 
 const el = (id) => document.getElementById(id);
 const call = (name, data) => httpsCallable(functions, name)(data);
+const storage = getStorage();
 const dia = 24 * 60 * 60 * 1000;
 let usuario;
 let nomeUsuario = "";
@@ -19,10 +22,16 @@ let colunasRelevantes = new Set();
 let leituraEmAndamento = "";
 let ultimaLeitura = "";
 let versaoHistorico = 0;
+let forcarScrollFim = true;
+let acompanhandoFimHistorico = true;
 let assinaturaAcesso = "";
 let cancelarCards = [];
 let atualizandoAcesso = false;
 let ultimoAcessoRegistrado = "";
+let estadoLista = "carregando";
+let mensagemErroAcesso = "";
+let arquivoSelecionado = null;
+const urlsMidia = new Set();
 const contagens = new Map();
 const contagensPendentes = new Map();
 const filaContagens = [];
@@ -58,6 +67,25 @@ function aviso(texto, erro = false) {
   el("conversas-aviso").style.display = texto ? "block" : "none";
 }
 
+function atualizarJanela(card) {
+  const entrada = millis(card && card.lastInboundAt);
+  const expiraEm = entrada + dia;
+  const restante = expiraEm - Date.now();
+  const aberta = !!entrada && restante > 0;
+  el("janela-status").textContent = aberta
+    ? "Janela de 24h ativa"
+    : "Janela encerrada · use modelo";
+  el("janela-status").classList.toggle("status-aviso", !aberta);
+  el("janela-contagem").hidden = !aberta;
+  el("janela-contagem").textContent = aberta
+    ? "Tempo restante: " + formatarTempoRestante(expiraEm)
+    : "";
+  if (!aberta && el("tipo").value === "text") {
+    el("tipo").value = "template";
+    atualizarTipo();
+  }
+}
+
 async function registrarHistorico(cardId, tipo, detalhes) {
   await addDoc(collection(db, "cards", cardId, "historico"), {
     tipo,
@@ -76,6 +104,14 @@ function renderizarLista() {
     [card.nomeConta, card.telefone].some((valor) => String(valor || "").toLocaleLowerCase("pt-BR").includes(termo))
   ).sort((a, b) => millis(b.ultimaAtividade) - millis(a.ultimaAtividade));
   lista.replaceChildren();
+  if (estadoLista !== "pronta") {
+    lista.textContent = {
+      carregando: "Carregando conversas...",
+      erro: "Não foi possível carregar as conversas.",
+      semPermissao: "Nenhuma coluna autorizada. Solicite acesso às colunas."
+    }[estadoLista];
+    return;
+  }
   if (!visiveis.length) {
     lista.textContent = "Nenhuma conversa encontrada.";
     return;
@@ -153,8 +189,11 @@ function atualizarPainel() {
   const card = cards.find((item) => item.id === selecionado);
   el("conversa-vazia").hidden = !!card;
   el("conversa-ativa").hidden = !card;
+  el("anexar-arquivo").disabled = !card || el("tipo").value === "template";
   if (!card) {
     ultimoAcessoRegistrado = "";
+    el("janela-contagem").hidden = true;
+    el("janela-contagem").textContent = "";
     if (selecionado) el("conversa-vazia").textContent = "Conversa não encontrada ou indisponível.";
     return;
   }
@@ -175,18 +214,34 @@ function atualizarPainel() {
   const botao = el("atendimento-acao");
   botao.disabled = !!atendimento && atendimento.uid !== usuario.uid && !administrador;
   botao.textContent = atendimento && (atendimento.uid === usuario.uid || administrador) ? "Liberar" : "Assumir";
-  const aberta = millis(card.lastInboundAt) && Date.now() - millis(card.lastInboundAt) <= dia;
-  el("janela-status").textContent = aberta
-    ? "Janela de 24h ativa"
-    : "Janela encerrada · use modelo";
-  el("janela-status").classList.toggle("status-aviso", !aberta);
-  if (!aberta && el("tipo").value === "text") {
-    el("tipo").value = "template";
-    atualizarTipo();
-  }
+  atualizarJanela(card);
   if (numeros.some((numero) => numero.phoneNumberId === card.whatsappPhoneNumberId)) {
     el("numero").value = card.whatsappPhoneNumberId;
   }
+}
+
+async function carregarMidiaAutenticada(url) {
+  const atual = auth.currentUser;
+  if (!atual) throw new Error("Sua sessão expirou. Entre novamente para abrir a mídia.");
+  const token = await atual.getIdToken();
+  const resposta = await fetch(url, {
+    headers: { Authorization: "Bearer " + token },
+    cache: "no-store"
+  });
+  if (!resposta.ok) {
+    if (resposta.status === 401 || resposta.status === 403) {
+      throw new Error("Você não tem acesso a esta mídia ou sua sessão expirou.");
+    }
+    throw new Error("Não foi possível carregar a mídia (" + resposta.status + ").");
+  }
+  const objeto = URL.createObjectURL(await resposta.blob());
+  urlsMidia.add(objeto);
+  return objeto;
+}
+
+function revogarUrlsMidia() {
+  urlsMidia.forEach((url) => URL.revokeObjectURL(url));
+  urlsMidia.clear();
 }
 
 async function carregarHistorico() {
@@ -198,7 +253,15 @@ async function carregarHistorico() {
     const resultado = await call("getWhatsAppMessages", { cardId });
     if (cardId !== selecionado || versao !== versaoHistorico) return;
     const lista = el("historico");
-    const estavaNoFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 60;
+    const estavaNoFim = deveRolarAoFim({
+      scrollHeight: lista.scrollHeight,
+      scrollTop: lista.scrollTop,
+      clientHeight: lista.clientHeight,
+      forcar: forcarScrollFim
+    });
+    forcarScrollFim = false;
+    acompanhandoFimHistorico = estavaNoFim;
+    revogarUrlsMidia();
     lista.replaceChildren();
     const mensagens = resultado.data.messages || [];
     if (!mensagens.length) lista.textContent = "Ainda não há mensagens.";
@@ -206,13 +269,28 @@ async function carregarHistorico() {
       const saida = mensagem.direction === "outgoing";
       lista.appendChild(criarMensagem({
         saida,
-        autor: saida ? (mensagem.atendente && (mensagem.atendente.nome || mensagem.atendente.uid)) || "Equipe" : "Cliente",
+        autor: saida ? (mensagem.atendente && mensagem.atendente.nome) || "Equipe" : "Cliente",
         texto: mensagem.text || "[Mensagem sem texto]",
+        tipo: mensagem.type || "text",
+        mediaUrl: mensagem.mediaUrl || "",
+        mediaError: mensagem.mediaError || "",
+        fileName: mensagem.fileName || "",
+        caption: mensagem.caption || "",
+        location: mensagem.location || null,
+        contacts: mensagem.contacts || [],
+        details: mensagem.details || null,
+        carregarMidia: carregarMidiaAutenticada,
+        aoCarregarMidia: () => {
+          if (cardId === selecionado && acompanhandoFimHistorico) lista.scrollTop = lista.scrollHeight;
+        },
         horario: (mensagem.timestamp ? new Date(mensagem.timestamp).toLocaleString("pt-BR") : "") +
           (mensagem.status ? " · " + mensagem.status : "")
       }));
     });
-    if (estavaNoFim) lista.scrollTop = lista.scrollHeight;
+    if (estavaNoFim) {
+      lista.scrollTop = lista.scrollHeight;
+      acompanhandoFimHistorico = true;
+    }
     marcarLida(card);
   } catch (erro) {
     if (cardId === selecionado) aviso("Não foi possível carregar o histórico: " + erro.message, true);
@@ -221,6 +299,8 @@ async function carregarHistorico() {
 
 function selecionar(id) {
   selecionado = id;
+  forcarScrollFim = true;
+  acompanhandoFimHistorico = true;
   ultimaLeitura = "";
   versaoHistorico++;
   history.replaceState(null, "", "conversas.html?card=" + encodeURIComponent(id));
@@ -230,31 +310,86 @@ function selecionar(id) {
   carregarHistorico();
 }
 
+function formatarTamanho(bytes) {
+  return bytes < 1024 * 1024
+    ? Math.max(1, Math.round(bytes / 1024)) + " KB"
+    : (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function desenharArquivoSelecionado() {
+  const status = el("arquivo-selecionado");
+  status.replaceChildren();
+  status.hidden = !arquivoSelecionado;
+  if (!arquivoSelecionado) return;
+  const nome = document.createElement("span");
+  nome.textContent = arquivoSelecionado.name + " · " + formatarTamanho(arquivoSelecionado.size);
+  const remover = document.createElement("button");
+  remover.type = "button";
+  remover.className = "arquivo-remover";
+  remover.setAttribute("aria-label", "Remover arquivo anexado");
+  remover.textContent = "Remover";
+  remover.addEventListener("click", limparArquivoSelecionado);
+  status.append(nome, remover);
+}
+
+function limparArquivoSelecionado() {
+  arquivoSelecionado = null;
+  el("arquivo-input").value = "";
+  desenharArquivoSelecionado();
+}
+
+function selecionarArquivo(file) {
+  if (!file) return;
+  const classificacao = classificarArquivo(file);
+  if (!file.size || file.size > classificacao.maxBytes) {
+    window.alert("Este arquivo excede o limite para " + classificacao.tipo + ".");
+    el("arquivo-input").value = "";
+    return;
+  }
+  arquivoSelecionado = file;
+  desenharArquivoSelecionado();
+}
+
 function atualizarTipo() {
   const modelo = el("tipo").value === "template";
   el("campo-texto").hidden = modelo;
   el("campos-template").hidden = !modelo;
-  if (modelo) el("config-envio").open = true;
+  el("anexar-arquivo").disabled = modelo;
+  if (modelo) limparArquivoSelecionado();
 }
 
-async function atualizarAcesso() {
-  if (atualizandoAcesso) return;
-  atualizandoAcesso = true;
+async function atualizarNumeros() {
   try {
-    const [acesso, conexoes] = await Promise.all([
-      call("listarAcessoConversas", {}),
-      call("getWhatsAppConnections", {})
-    ]);
-    numeros = (conexoes.data.numbers || []).filter((numero) => numero.active);
+    const conexoes = await call("getWhatsAppConnections", {});
+    if (!conexoes.data || !Array.isArray(conexoes.data.numbers)) {
+      throw new Error("Resposta inválida ao carregar os números de origem.");
+    }
+    numeros = conexoes.data.numbers.filter((numero) => numero.active);
     const numeroAnterior = el("numero").value;
     el("numero").replaceChildren(new Option("Selecione um número", ""));
     numeros.forEach((numero) => el("numero").add(new Option(numero.displayName || numero.displayPhoneNumber || numero.phoneNumberId, numero.phoneNumberId)));
     if (numeros.some((numero) => numero.phoneNumberId === numeroAnterior)) el("numero").value = numeroAnterior;
     else if (numeros.length === 1) el("numero").value = numeros[0].phoneNumberId;
-    if (!el("numero").value) el("config-envio").open = true;
+    atualizarPainel();
+  } catch (erro) {
+    console.error("Falha ao carregar números de origem:", erro);
+    numeros = [];
+    el("numero").replaceChildren(new Option("Número indisponível", ""));
+    aviso(descreverErroServico(erro, "getWhatsAppConnections"), true);
+  }
+}
 
-    const colunas = (acesso.data.colunas || []).slice().sort();
+async function atualizarPermissoes() {
+  try {
+    const acesso = await call("listarAcessoConversas", {});
+    if (!acesso.data || typeof acesso.data.completo !== "boolean" ||
+        !Array.isArray(acesso.data.colunas) || acesso.data.colunas.some((id) => typeof id !== "string" || !id)) {
+      throw new Error("Resposta inválida ao verificar o acesso às conversas.");
+    }
+    const colunas = acesso.data.colunas.slice().sort();
     colunasRelevantes = new Set(colunas);
+    if (mensagemErroAcesso && el("conversas-aviso").textContent === mensagemErroAcesso) aviso("");
+    mensagemErroAcesso = "";
     const assinatura = JSON.stringify([acesso.data.completo, colunas]);
     if (assinatura === assinaturaAcesso) return;
     assinaturaAcesso = assinatura;
@@ -268,6 +403,7 @@ async function atualizarAcesso() {
         consultas.push(query(collection(db, "cards"), where("colunaId", "in", colunas.slice(i, i + 30))));
       }
     }
+    estadoLista = consultas.length ? "carregando" : "semPermissao";
     renderizarLista();
     atualizarPainel();
     consultas.forEach((consulta, indice) => {
@@ -275,19 +411,42 @@ async function atualizarAcesso() {
         partes.set(indice, snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
           .filter((card) => !card.excluido));
         cards = Array.from(partes.values()).flat();
+        estadoLista = cards.length || partes.size === consultas.length ? "pronta" : "carregando";
         renderizarLista();
         atualizarPainel();
         carregarHistorico();
-      }, (erro) => aviso("Não foi possível carregar as conversas: " + erro.message, true)));
+      }, (erro) => {
+        console.error("Falha ao acompanhar cards das conversas:", erro);
+        cancelarCards.forEach((cancelar) => cancelar());
+        cancelarCards = [];
+        assinaturaAcesso = "";
+        cards = [];
+        estadoLista = "erro";
+        renderizarLista();
+        atualizarPainel();
+        mensagemErroAcesso = "Não foi possível carregar os cards: " + (erro.message || "erro de conexão.");
+        aviso(mensagemErroAcesso, true);
+      }));
     });
   } catch (erro) {
+    console.error("Falha ao atualizar acesso às conversas:", erro);
     cancelarCards.forEach((cancelar) => cancelar());
     cancelarCards = [];
     assinaturaAcesso = "";
     cards = [];
+    estadoLista = "erro";
     renderizarLista();
     atualizarPainel();
-    aviso("Não foi possível atualizar o acesso às conversas: " + erro.message, true);
+    mensagemErroAcesso = descreverErroServico(erro, "listarAcessoConversas");
+    aviso(mensagemErroAcesso, true);
+  }
+}
+
+async function atualizarAcesso() {
+  if (atualizandoAcesso) return;
+  atualizandoAcesso = true;
+  try {
+    await Promise.all([atualizarPermissoes(), atualizarNumeros()]);
   } finally { atualizandoAcesso = false; }
 }
 
@@ -344,6 +503,14 @@ onAuthStateChanged(auth, async (atual) => {
 });
 
 el("busca-conversas").addEventListener("input", renderizarLista);
+el("historico").addEventListener("scroll", () => {
+  const lista = el("historico");
+  acompanhandoFimHistorico = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 60;
+});
+setInterval(() => {
+  const card = cards.find((item) => item.id === selecionado);
+  if (card) atualizarJanela(card);
+}, 1000);
 el("solicitacao-colunas").addEventListener("submit", async (evento) => {
   evento.preventDefault();
   const columnIds = Array.from(el("colunas-solicitacao").querySelectorAll('input:checked'), (item) => item.value);
@@ -359,6 +526,25 @@ el("solicitacao-colunas").addEventListener("submit", async (evento) => {
   } finally { botao.disabled = false; }
 });
 el("tipo").addEventListener("change", atualizarTipo);
+el("anexar-arquivo").addEventListener("click", () => {
+  if (el("tipo").value !== "template") {
+    el("arquivo-input").value = "";
+    el("arquivo-input").click();
+  }
+});
+el("arquivo-input").addEventListener("change", (evento) => {
+  selecionarArquivo(evento.currentTarget.files && evento.currentTarget.files[0]);
+});
+el("texto").addEventListener("keydown", (evento) => {
+  if (!ehAtalhoEnviar(evento)) return;
+  evento.preventDefault();
+  el("form-conversa").requestSubmit();
+});
+el("texto").addEventListener("input", (evento) => {
+  const campo = evento.currentTarget;
+  campo.style.height = "auto";
+  campo.style.height = Math.min(campo.scrollHeight, 120) + "px";
+});
 document.addEventListener("visibilitychange", () => { if (!document.hidden) carregarHistorico(); });
 el("sair").addEventListener("click", async () => { await signOut(auth); location.href = "index.html"; });
 el("atendimento-acao").addEventListener("click", async () => {
@@ -379,29 +565,81 @@ el("form-conversa").addEventListener("submit", async (evento) => {
   const cardId = selecionado;
   const textoEnviado = el("texto").value;
   const tipoEnviado = el("tipo").value;
+  const arquivoEnviado = arquivoSelecionado;
+  const classificacao = arquivoEnviado ? classificarArquivo(arquivoEnviado) : null;
+  if (tipoEnviado !== "template" && !textoEnviado.trim() && !arquivoEnviado) {
+    window.alert("Digite uma mensagem ou anexe um arquivo.");
+    el("texto").focus();
+    return;
+  }
+  if (!el("numero").value) {
+    window.alert("Selecione um número de origem nas opções de envio.");
+    return;
+  }
+  if (arquivoEnviado && textoEnviado.trim().length > 1024) {
+    window.alert("A legenda do arquivo aceita no máximo 1024 caracteres.");
+    return;
+  }
+  if (arquivoEnviado && textoEnviado.trim() && !["image", "video", "document"].includes(classificacao.tipo)) {
+    window.alert("Este tipo de arquivo não aceita legenda.");
+    return;
+  }
   const botao = evento.currentTarget.querySelector('button[type="submit"]');
+  const botaoAnexo = el("anexar-arquivo");
+  let referenciaUpload = null;
   botao.disabled = true;
+  botaoAnexo.disabled = true;
   try {
+    let filePath = "";
+    if (arquivoEnviado) {
+      filePath = "whatsapp-uploads/" + usuario.uid + "/" + crypto.randomUUID();
+      referenciaUpload = ref(storage, filePath);
+      await uploadBytes(referenciaUpload, arquivoEnviado, {
+        contentType: classificacao.mimeType,
+        customMetadata: {
+          fileName: arquivoEnviado.name.slice(0, 180),
+          caption: textoEnviado.trim()
+        }
+      });
+    }
     await call("sendWhatsAppMessage", {
       cardId,
       phoneNumberId: el("numero").value,
-      mode: tipoEnviado,
+      mode: arquivoEnviado ? "media" : tipoEnviado,
       text: textoEnviado.trim(),
+      filePath,
       templateName: el("template").value.trim(),
       templateLanguage: el("idioma").value.trim(),
       templateVariables: el("variaveis").value
     });
-    if (selecionado === cardId && el("texto").value === textoEnviado) el("texto").value = "";
-    aviso("Mensagem aceita pela Meta.");
+    if (selecionado === cardId && el("texto").value === textoEnviado) {
+      el("texto").value = "";
+      el("texto").style.height = "";
+      if (arquivoSelecionado === arquivoEnviado) limparArquivoSelecionado();
+    }
     try {
-      await registrarHistorico(cardId, "mensagemWhatsapp", { tipo: tipoEnviado });
+      await registrarHistorico(cardId, "mensagemWhatsapp", {
+        tipo: arquivoEnviado ? "media" : tipoEnviado,
+        arquivo: arquivoEnviado ? arquivoEnviado.name : ""
+      });
     } catch (erro) {
-      aviso("Mensagem aceita pela Meta, mas não foi possível registrar o envio no histórico do card: " + erro.message, true);
+      window.alert("A mensagem foi enviada, mas não foi possível registrar o envio no histórico do card: " + erro.message);
     }
     await carregarHistorico();
   } catch (erro) {
-    aviso("Não foi possível enviar: " + erro.message, true);
+    if (referenciaUpload) {
+      try {
+        await deleteObject(referenciaUpload);
+      } catch (erroLimpeza) {
+        console.warn("Não foi possível limpar o upload temporário após falha.", erroLimpeza.message);
+      }
+    }
+    const detalhe = erro.code && String(erro.code).startsWith("functions/")
+      ? descreverErroServico(erro, "sendWhatsAppMessage")
+      : erro.message || "Erro desconhecido.";
+    window.alert("Não foi possível enviar: " + detalhe);
   } finally {
     botao.disabled = false;
+    botaoAnexo.disabled = !selecionado || el("tipo").value === "template";
   }
 });

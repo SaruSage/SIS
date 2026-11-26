@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/whatsapp.css">
   <link rel="stylesheet" href="css/conversas.css">
 </head>
-<body>
+<body class="pagina-conversas">
 <div id="conteudo-protegido" class="oculto">
   <div class="app-shell">
     <aside class="sidebar">
@@ -60,26 +60,37 @@
             <div class="conversa-topo">
               <span id="contato-avatar" class="conversa-avatar avatar-topo" aria-hidden="true"></span>
               <div class="conversa-identidade"><h2 id="contato-nome"></h2><p id="contato-telefone"></p></div>
-              <div class="conversa-estados"><span id="atendimento-status" class="conversa-status"></span><span id="janela-status" class="conversa-status" role="status"></span><button id="atendimento-acao" type="button"></button></div>
+              <div class="conversa-estados"><span id="atendimento-status" class="conversa-status"></span><span class="conversa-janela"><span id="janela-status" class="conversa-status" role="status"></span><span id="janela-contagem" class="conversa-janela-contagem" role="timer" aria-live="off" hidden></span></span><button id="atendimento-acao" type="button"></button></div>
             </div>
             <div id="historico" class="whatsapp-conversa-lista" aria-live="polite"></div>
             <form id="form-conversa" class="whatsapp-conversa-form">
-              <details id="config-envio" class="envio-opcoes">
-                <summary>Opções de envio</summary>
-                <div class="envio-opcoes-campos">
-                  <label>Número de origem<select id="numero" required></select></label>
-                  <label>Tipo<select id="tipo"><option value="text">Mensagem de texto</option><option value="template">Modelo aprovado</option></select></label>
-                </div>
-              </details>
-              <div id="campos-template" hidden>
-                <label>Nome do modelo<input id="template" placeholder="nome_do_modelo"></label>
-                <label>Idioma<input id="idioma" value="pt_BR"></label>
-                <label>Parâmetros do corpo (um por linha)<textarea id="variaveis" rows="2"></textarea></label>
-              </div>
               <div class="compositor">
+                <details id="config-envio" class="envio-opcoes">
+                  <summary aria-label="Opções de envio" title="Opções de envio">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+                  </summary>
+                  <div class="envio-opcoes-painel">
+                    <div class="envio-opcoes-campos">
+                      <label>Número de origem<select id="numero" required></select></label>
+                      <label>Tipo<select id="tipo"><option value="text">Mensagem de texto</option><option value="template">Modelo aprovado</option></select></label>
+                    </div>
+                    <div id="campos-template" hidden>
+                      <label>Nome do modelo<input id="template" placeholder="nome_do_modelo"></label>
+                      <label>Idioma<input id="idioma" value="pt_BR"></label>
+                      <label>Parâmetros do corpo (um por linha)<textarea id="variaveis" rows="2"></textarea></label>
+                    </div>
+                  </div>
+                </details>
                 <label id="campo-texto"><span class="sr-only">Mensagem</span><textarea id="texto" rows="1" maxlength="4096" placeholder="Digite uma mensagem..."></textarea></label>
-                <button type="submit" class="botao-primario" aria-label="Enviar pelo WhatsApp">Enviar <span aria-hidden="true">➤</span></button>
+                <input id="arquivo-input" class="arquivo-input" type="file" tabindex="-1">
+                <button id="anexar-arquivo" type="button" class="botao-anexo" aria-label="Anexar arquivo" title="Anexar arquivo">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 12.5 7.8-7.8a3.5 3.5 0 0 1 5 5l-9.9 9.9a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2"/></svg>
+                </button>
+                <button type="submit" class="botao-primario compositor-enviar" aria-label="Enviar mensagem" title="Enviar mensagem">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                </button>
               </div>
+              <p id="arquivo-selecionado" class="arquivo-selecionado" role="status" hidden></p>
             </form>
           </div>
           <p id="conversas-aviso" class="mensagem" role="status"></p>

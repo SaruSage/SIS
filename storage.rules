@@ -1,0 +1,31 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /whatsapp-uploads/{uid}/{fileName} {
+      allow create: if request.auth != null &&
+        request.auth.uid == uid &&
+        fileName.matches('^[a-fA-F0-9-]{36}$') &&
+        request.resource.size > 0 &&
+        request.resource.size <= 100 * 1024 * 1024 &&
+        request.resource.contentType.matches('^[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+$');
+      allow delete: if request.auth != null &&
+        request.auth.uid == uid &&
+        fileName.matches('^[a-fA-F0-9-]{36}$');
+      allow read, update: if false;
+    }
+
+    match /internal-chat-media/{uid}/{fileName} {
+      allow create: if request.auth != null &&
+        request.auth.uid == uid &&
+        fileName.matches('^[a-fA-F0-9-]{36}$') &&
+        request.resource.size > 0 &&
+        request.resource.size <= 100 * 1024 * 1024 &&
+        request.resource.contentType.matches('^[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+$');
+      allow read, update, delete: if false;
+    }
+
+    match /whatsapp-media/{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
