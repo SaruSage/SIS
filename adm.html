@@ -141,6 +141,19 @@
             <div id="lista-solicitacoes">
               <p class="texto-ajuda">Carregando solicitações...</p>
             </div>
+            <h2>Solicitações de notificações de colunas</h2>
+            <button type="button" id="atualizar-notificacoes-colunas" class="botao-primario">Atualizar</button>
+            <div id="solicitacoes-notificacoes-colunas"></div>
+          </div>
+
+          <div class="painel-branco bloco-adm">
+            <h2>Notificações por coluna</h2>
+            <form id="config-notificacoes-colunas">
+              <label>Coluna <select id="config-coluna" required></select></label>
+              <label>E-mail do usuário <input id="config-email" type="email" required></label>
+              <button type="submit" class="botao-primario">Adicionar usuário</button>
+            </form>
+            <div id="lista-notificacoes-colunas"></div>
           </div>
 
           <p id="mensagem" class="mensagem"></p>

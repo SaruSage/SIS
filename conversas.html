@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conversas — Projeto Golden</title>
+  <script>(function(){var t=localStorage.getItem("golden-tema")||"claro",f=localStorage.getItem("golden-fonte")||"normal";document.documentElement.className="tema-"+t+" fonte-"+f;})();</script>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/layout-base.css">
+  <link rel="stylesheet" href="css/whatsapp.css">
+  <link rel="stylesheet" href="css/conversas.css">
+</head>
+<body>
+<div id="conteudo-protegido" class="oculto">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-topo"><span class="sidebar-logo">Projeto Golden</span><button type="button" class="botao-recolher" title="Recolher menu">‹</button></div>
+      <nav class="sidebar-nav">
+        <a href="home.html" class="nav-item"><span class="nav-icone" data-icone="home"></span><span class="nav-label">Home</span></a>
+        <a href="vendas.html" class="nav-item" data-cargos="vendas"><span class="nav-icone" data-icone="vendas"></span><span class="nav-label">Vendas</span></a>
+        <a href="estoque.html" class="nav-item" data-cargos="estoque"><span class="nav-icone" data-icone="estoque"></span><span class="nav-label">Estoque</span></a>
+        <a href="#" class="nav-item" data-cargos="producao"><span class="nav-icone" data-icone="producao"></span><span class="nav-label">Produção</span></a>
+        <a href="#" class="nav-item" data-cargos="consultoria"><span class="nav-icone" data-icone="consultoria"></span><span class="nav-label">Consultoria</span></a>
+        <a href="adm.html" class="nav-item" data-admin-only><span class="nav-icone" data-icone="admin"></span><span class="nav-label">Administrador</span></a>
+      </nav>
+      <div class="sidebar-rodape">
+        <div class="card-controle"><h4>Centro de controle</h4><div class="linha-controle"><span>Usuários ativos</span><strong id="contagem-usuarios">—</strong></div><div class="linha-controle"><span>Solicitações</span><strong id="contagem-pendentes">—</strong></div></div>
+        <div class="sidebar-config"><button type="button" id="botao-config" class="botao-config"><span class="nav-icone" data-icone="config"></span><span class="nav-label">Configurações</span></button></div>
+      </div>
+    </aside>
+    <div class="app-main">
+      <header class="app-header">
+        <h1 class="titulo-modulo-header">Conversas</h1>
+        <div class="header-acoes">
+          <button type="button" id="botao-perfil" class="botao-perfil-header"><span id="avatar" class="avatar-header">?</span><span id="nome-usuario" class="nome-header">...</span></button>
+          <div id="menu-perfil" class="caixa-header">
+            <div class="perfil-info-topo"><p id="nome-completo-usuario" class="texto-nome-perfil"></p><p id="email-usuario" class="texto-email"></p></div>
+            <button type="button" id="item-config-usuario" class="item-caixa">Configurações</button>
+            <button type="button" id="sair" class="item-caixa perigo">Sair</button>
+          </div>
+        </div>
+      </header>
+      <main class="conversas-layout">
+        <section class="conversas-fila" aria-label="Lista de conversas">
+          <div class="fila-cabecalho"><h2>Conversas</h2><p>Atendimento aos clientes</p></div>
+          <label class="sr-only" for="busca-conversas">Buscar contato</label>
+          <input id="busca-conversas" class="conversas-busca" type="search" placeholder="Nome ou telefone">
+          <details class="fila-opcoes">
+            <summary>Solicitar notificações de colunas</summary>
+            <form id="solicitacao-colunas">
+              <div id="colunas-solicitacao">Carregando colunas...</div>
+              <button type="submit">Solicitar ao administrador</button>
+            </form>
+          </details>
+          <div id="lista-conversas" class="conversas-lista">Carregando...</div>
+        </section>
+        <section class="conversas-painel" aria-label="Conversa selecionada">
+          <p id="conversa-vazia" class="conversa-vazia">Selecione uma conversa para visualizar o histórico.</p>
+          <div id="conversa-ativa" hidden>
+            <div class="conversa-topo">
+              <span id="contato-avatar" class="conversa-avatar avatar-topo" aria-hidden="true"></span>
+              <div class="conversa-identidade"><h2 id="contato-nome"></h2><p id="contato-telefone"></p></div>
+              <div class="conversa-estados"><span id="atendimento-status" class="conversa-status"></span><span id="janela-status" class="conversa-status" role="status"></span><button id="atendimento-acao" type="button"></button></div>
+            </div>
+            <div id="historico" class="whatsapp-conversa-lista" aria-live="polite"></div>
+            <form id="form-conversa" class="whatsapp-conversa-form">
+              <details id="config-envio" class="envio-opcoes">
+                <summary>Opções de envio</summary>
+                <div class="envio-opcoes-campos">
+                  <label>Número de origem<select id="numero" required></select></label>
+                  <label>Tipo<select id="tipo"><option value="text">Mensagem de texto</option><option value="template">Modelo aprovado</option></select></label>
+                </div>
+              </details>
+              <div id="campos-template" hidden>
+                <label>Nome do modelo<input id="template" placeholder="nome_do_modelo"></label>
+                <label>Idioma<input id="idioma" value="pt_BR"></label>
+                <label>Parâmetros do corpo (um por linha)<textarea id="variaveis" rows="2"></textarea></label>
+              </div>
+              <div class="compositor">
+                <label id="campo-texto"><span class="sr-only">Mensagem</span><textarea id="texto" rows="1" maxlength="4096" placeholder="Digite uma mensagem..."></textarea></label>
+                <button type="submit" class="botao-primario" aria-label="Enviar pelo WhatsApp">Enviar <span aria-hidden="true">➤</span></button>
+              </div>
+            </form>
+          </div>
+          <p id="conversas-aviso" class="mensagem" role="status"></p>
+        </section>
+      </main>
+    </div>
+  </div>
+</div>
+<script type="module" src="js/conversas.js"></script>
+</body>
+</html>

@@ -20,7 +20,8 @@
 // 6. Aprovação inteligente: e-mail já existente = reativa.
 // ============================================================
 
-import { auth, db, firebaseConfig } from "./firebase-config.js";
+import { auth, db, functions, firebaseConfig } from "./firebase-config.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
 import {
   onAuthStateChanged, signOut,
@@ -112,6 +113,12 @@ let buscaAtiva = false;
 // "Cache" local das solicitações. O onSnapshot o mantém sempre
 // atualizado; as funções de renderização apenas o leem.
 let cacheSolicitacoes = [];
+let pendentesAcesso = 0;
+let pendentesColunas = 0;
+
+function atualizarContagemPendentes() {
+  if (contagemPendentes) contagemPendentes.textContent = pendentesAcesso + pendentesColunas;
+}
 
 function mostrarMensagem(texto, tipo) {
   if (!areaMensagem) return;
@@ -151,6 +158,80 @@ onAuthStateChanged(auth, async (usuario) => {
   atualizarCabecalhoUsuario(dadosUsuario);
 
   escutarSolicitacoes();
+  carregarNotificacoesColunas();
+  setInterval(carregarNotificacoesColunas, 15000);
+});
+
+async function carregarNotificacoesColunas() {
+  try {
+    const [colunas, resultado] = await Promise.all([
+      getDocs(collection(db, "colunas")),
+      httpsCallable(functions, "listarNotificacoesColunas")({})
+    ]);
+    const nomes = new Map(colunas.docs.map((coluna) => [coluna.id, coluna.data().nome || coluna.id]));
+    const seletor = document.getElementById("config-coluna");
+    const valorAnterior = seletor.value;
+    seletor.replaceChildren(new Option("Selecione uma coluna", ""));
+    nomes.forEach((nome, id) => seletor.add(new Option(nome, id)));
+    if (nomes.has(valorAnterior)) seletor.value = valorAnterior;
+    const configuracoes = document.getElementById("lista-notificacoes-colunas");
+    configuracoes.replaceChildren();
+    resultado.data.configs.forEach((config) => {
+      config.destinatarios.forEach((usuario) => {
+        const linha = document.createElement("p");
+        linha.textContent = (nomes.get(config.columnId) || config.columnId) + " — " + usuario.email + " ";
+        linha.appendChild(criarBotao("Remover", "botao-rejeitar", async () => {
+          try {
+            await httpsCallable(functions, "configurarNotificacaoColuna")({ columnId: config.columnId, email: usuario.email, ativa: false });
+            await carregarNotificacoesColunas();
+          } catch (erro) { mostrarMensagem("Erro ao remover permissão: " + erro.message, "erro"); }
+        }));
+        configuracoes.appendChild(linha);
+      });
+    });
+    if (!configuracoes.children.length) configuracoes.textContent = "Nenhum usuário configurado.";
+    const lista = document.getElementById("solicitacoes-notificacoes-colunas");
+    lista.replaceChildren();
+    resultado.data.solicitacoes.forEach((solicitacao) => {
+      const linha = document.createElement("div");
+      linha.className = "cartao-solicitacao";
+      const texto = document.createElement("p");
+      texto.textContent = solicitacao.usuario.email + " — " + solicitacao.colunas.map((coluna) => coluna.nome).join(", ");
+      linha.appendChild(texto);
+      for (const [rotulo, aprovar] of [["Aprovar", true], ["Rejeitar", false]]) {
+        linha.appendChild(criarBotao(rotulo, aprovar ? "botao-aprovar" : "botao-rejeitar", async () => {
+          try {
+            await httpsCallable(functions, "decidirNotificacoesColunas")({ id: solicitacao.id, aprovar });
+            await carregarNotificacoesColunas();
+          } catch (erro) { mostrarMensagem("Erro ao decidir solicitação: " + erro.message, "erro"); }
+        }));
+      }
+      lista.appendChild(linha);
+    });
+    pendentesColunas = resultado.data.solicitacoes.length;
+    atualizarContagemPendentes();
+    if (!lista.children.length) lista.textContent = "Nenhuma solicitação pendente.";
+  } catch (erro) {
+    mostrarMensagem("Erro ao carregar notificações de colunas: " + erro.message, "erro");
+  }
+}
+
+document.getElementById("atualizar-notificacoes-colunas").addEventListener("click", carregarNotificacoesColunas);
+document.getElementById("config-notificacoes-colunas").addEventListener("submit", async (evento) => {
+  evento.preventDefault();
+  const botao = evento.currentTarget.querySelector('button[type="submit"]');
+  botao.disabled = true;
+  try {
+    await httpsCallable(functions, "configurarNotificacaoColuna")({
+      columnId: document.getElementById("config-coluna").value,
+      email: document.getElementById("config-email").value,
+      ativa: true
+    });
+    await carregarNotificacoesColunas();
+    mostrarMensagem("Notificação de coluna configurada.", "sucesso");
+  } catch (erro) {
+    mostrarMensagem("Erro ao configurar notificação: " + erro.message, "erro");
+  } finally { botao.disabled = false; }
 });
 
 // ------------------------------------------------------------
@@ -230,7 +311,8 @@ function escutarSolicitacoes() {
     });
 
     if (contagemUsuarios) contagemUsuarios.textContent = aprovados;
-    if (contagemPendentes) contagemPendentes.textContent = pendentes;
+    pendentesAcesso = pendentes;
+    atualizarContagemPendentes();
 
     renderizarSolicitacoes();
   });

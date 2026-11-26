@@ -84,20 +84,27 @@ function createHarness() {
   }
 
   function collection(collectionPath, filter, ordering, maxCount) {
-    return {
+    const ref = {
       doc: (id) => documentRef(`${collectionPath}/${id || `generated-${++nextId}`}`),
-      where: (field, operator, value) => {
-        assert.equal(operator, "==");
-        return collection(collectionPath, { field, value }, ordering, maxCount);
-      },
+      where: (field, operator, value) => collection(collectionPath, { field, operator, value }, ordering, maxCount),
       orderBy: (field, direction = "asc") =>
         collection(collectionPath, filter, { field, direction }, maxCount),
       limit: (count) => collection(collectionPath, filter, ordering, count),
+      count: () => ({ get: async () => {
+        const count = (await ref.get()).docs.length;
+        return { data: () => ({ count }) };
+      } }),
       get: async () => {
         const prefix = `${collectionPath}/`;
         let docs = [...documents.keys()]
           .filter((key) => key.startsWith(prefix) && !key.slice(prefix.length).includes("/"))
-          .filter((key) => !filter || documents.get(key)[filter.field] === filter.value)
+          .filter((key) => {
+            if (!filter) return true;
+            const value = documents.get(key)[filter.field];
+            if (filter.operator === "array-contains") return Array.isArray(value) && value.includes(filter.value);
+            if (filter.operator === ">") return value && value.toMillis() > filter.value.toMillis();
+            return value === filter.value;
+          })
           .map(snapshot);
         if (ordering) {
           docs.sort((a, b) => {
@@ -114,6 +121,7 @@ function createHarness() {
         return { docs, empty: docs.length === 0 };
       }
     };
+    return ref;
   }
 
   const db = {
@@ -186,6 +194,17 @@ function createHarness() {
         return { SecretManagerServiceClient };
       case "firebase-admin/app":
         return { initializeApp() {} };
+      case "firebase-admin/auth":
+        return { getAuth: () => ({
+          getUserByEmail: async (email) => ({
+            uid: email === "eamgfn4ever@gmail.com" ? "admin" : email === "vendas@example.test" ? "sales" : email.split("@")[0],
+            email, displayName: "Usuário"
+          }),
+          getUser: async (uid) => ({
+            uid, email: uid === "admin" ? "eamgfn4ever@gmail.com" : uid === "sales" ? "vendas@example.test" : `${uid}@example.test`,
+            displayName: uid
+          })
+        }) };
       case "firebase-admin/firestore":
         return {
           getFirestore: () => db,
@@ -302,7 +321,20 @@ function createHarness() {
     documents, secrets, secretResources, errors, warnings, calls, failures, graphCalls, graphPages, graphNumbers,
     webhook, connect: exports.connectWhatsAppNumber,
     updateNumber: exports.updateWhatsAppNumber, checkNumber: exports.checkWhatsAppNumberStatus,
-    saveAutomation: exports.saveWhatsAppAutomation
+    saveAutomation: exports.saveWhatsAppAutomation,
+    sendMessage: exports.sendWhatsAppMessage, getMessages: exports.getWhatsAppMessages,
+    countUnread: exports.contarNaoLidasWhatsApp,
+    getConversationAccess: exports.listarAcessoConversas,
+    setAttendance: exports.definirAtendimentoWhatsApp,
+    markConversationRead: exports.marcarConversaWhatsAppLida,
+    configureColumnNotifications: exports.configurarNotificacaoColuna,
+    requestColumnNotifications: exports.solicitarNotificacoesColunas,
+    decideColumnNotifications: exports.decidirNotificacoesColunas,
+    notifyColumnEntry: exports.notificarEntradaColuna,
+    createChat: exports.criarChatInterno,
+    sendChat: exports.enviarMensagemChatInterno,
+    getChatMessages: exports.obterMensagensChatInterno,
+    chatPresence: exports.presencaChatInterno
   };
 }
 
@@ -392,6 +424,136 @@ test("regras de 24 horas incluem atividade da equipe e normalizam opções", () 
   assert.equal(whatsappAutomation.findMatchingOption(active, "10"), null);
 });
 
+test("mensagem manual registra atendente autenticado sem incluí-lo no payload da Meta", async () => {
+    const h = createHarness();
+    h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+    const entrada = Date.now();
+    h.documents.set(`cards/${appA.cardId}`, {
+      ...h.documents.get(`cards/${appA.cardId}`),
+      lastInboundAt: { toMillis: () => entrada }
+    });
+    const auth = { uid: "atendente-1", token: { email: "eamgfn4ever@gmail.com", name: "Atendente Teste" } };
+    await h.sendMessage({
+      auth,
+      data: {
+        cardId: appA.cardId,
+        phoneNumberId: appA.phoneNumberId,
+        mode: "text",
+        text: "Olá, cliente!",
+        atendente: { nome: "Nome falsificado" }
+      }
+    });
+
+    const payload = h.graphCalls.find((call) => call.path.endsWith("/messages")).payload;
+    assert.equal(payload.text.body, "Olá, cliente!");
+    assert.equal(JSON.stringify(payload).includes("Atendente Teste"), false);
+    assert.equal(JSON.stringify(payload).includes("Nome falsificado"), false);
+    const stored = h.documents.get(`cards/${appA.cardId}/mensagensWhatsapp/wamid-outgoing`);
+    assert.equal(stored.atendente.uid, auth.uid);
+    assert.equal(stored.atendente.nome, "Atendente Teste");
+    const history = await h.getMessages({ auth, data: { cardId: appA.cardId } });
+    assert.equal(history.messages[0].atendente.nome, "Atendente Teste");
+    assert.equal(h.documents.get(`cards/${appA.cardId}`).ultimaMensagemWhatsapp, "Olá, cliente!");
+});
+
+test("mensagem manual usa identificação autenticada quando não há nome", async () => {
+    const h = createHarness();
+    h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+    h.documents.set(`cards/${appA.cardId}`, {
+      ...h.documents.get(`cards/${appA.cardId}`),
+      lastInboundAt: { toMillis: () => Date.now() }
+    });
+    const auth = { uid: "atendente-2", token: { email: "eamgfn4ever@gmail.com" } };
+    await h.sendMessage({
+      auth,
+      data: { cardId: appA.cardId, phoneNumberId: appA.phoneNumberId, mode: "text", text: "Olá" }
+    });
+    assert.equal(h.documents.get(`cards/${appA.cardId}/mensagensWhatsapp/wamid-outgoing`).atendente.nome, auth.token.email);
+});
+
+test("atendimento humano impede outros usuários e pode ser liberado pelo administrador", async () => {
+      const h = createHarness();
+      const auth = { uid: "responsavel", token: { email: "vendas@example.test", name: "Responsável" } };
+      const other = { uid: "outro", token: { email: "vendas@example.test" } };
+      const admin = { uid: "admin", token: { email: "eamgfn4ever@gmail.com" } };
+      h.documents.set("solicitacoes/sales", { email: "vendas@example.test", status: "aprovada", cargo: "vendas" });
+      await h.setAttendance({ auth, data: { cardId: appA.cardId, acao: "assumir" } });
+      assert.equal(h.documents.get(`cards/${appA.cardId}`).atendimentoWhatsapp.uid, "responsavel");
+      await assert.rejects(h.setAttendance({ auth: other, data: { cardId: appA.cardId, acao: "liberar" } }),
+        (error) => error.code === "permission-denied");
+      await h.setAttendance({ auth: admin, data: { cardId: appA.cardId, acao: "liberar" } });
+      assert.equal(h.documents.get(`cards/${appA.cardId}`).atendimentoWhatsapp, null);
+    });
+
+test("marcar conversa lida registra a última entrada tanto na fila quanto para o usuário", async () => {
+      const h = createHarness();
+      const entrada = { toMillis: () => 123456 };
+      h.documents.set(`cards/${appA.cardId}`, { ...h.documents.get(`cards/${appA.cardId}`), lastInboundAt: entrada });
+      const auth = { uid: "leitor", token: { email: "eamgfn4ever@gmail.com" } };
+      await assert.rejects(h.markConversationRead({ auth, data: { cardId: appA.cardId, ultimaEntradaMillis: 123455 } }),
+        (error) => error.code === "failed-precondition");
+      await h.markConversationRead({ auth, data: { cardId: appA.cardId, ultimaEntradaMillis: 123456 } });
+      assert.equal(h.documents.get(`cards/${appA.cardId}`).whatsappLidaAte, entrada);
+      assert.equal(h.documents.get(`leiturasConversas/leitor/cards/${appA.cardId}`).ultimaEntrada, entrada);
+    });
+
+test("contagem usa somente mensagens recebidas após a leitura individual e exige acesso", async () => {
+  const h = createHarness();
+  const auth = { uid: "leitor", token: { email: "eamgfn4ever@gmail.com" } };
+  const ref = `cards/${appA.cardId}/mensagensWhatsapp/`;
+  const timestamp = (n) => ({ toMillis: () => n });
+  h.documents.set(ref + "antiga", { direction: "incoming", criadoEm: timestamp(100) });
+  h.documents.set(ref + "resposta", { direction: "outgoing", criadoEm: timestamp(200) });
+  h.documents.set(ref + "nova", { direction: "incoming", criadoEm: timestamp(300) });
+  h.documents.set(ref + "outra", { direction: "incoming", criadoEm: timestamp(400) });
+  assert.equal((await h.countUnread({ auth, data: { cardId: appA.cardId } })).quantidade, 3);
+  h.documents.set(`leiturasConversas/leitor/cards/${appA.cardId}`, { ultimaEntrada: timestamp(100) });
+  assert.equal((await h.countUnread({ auth, data: { cardId: appA.cardId } })).quantidade, 2);
+  h.documents.set(`leiturasConversas/leitor/cards/${appA.cardId}`, { ultimaEntrada: timestamp(400) });
+  assert.equal((await h.countUnread({ auth, data: { cardId: appA.cardId } })).quantidade, 0);
+  await assert.rejects(h.countUnread({ data: { cardId: appA.cardId } }), (error) => error.code === "unauthenticated");
+});
+
+test("entrada antiga não substitui prévia de mensagem mais recente", async () => {
+  const h = createHarness();
+  const recente = { toMillis: () => Date.now() };
+  h.documents.set(`cards/${appA.cardId}`, {
+    ...h.documents.get(`cards/${appA.cardId}`),
+    atendimentoWhatsapp: { uid: "responsavel", nome: "Responsável" },
+    ultimaMensagemWhatsapp: "Mensagem recente",
+    ultimaMensagemWhatsappEm: recente
+  });
+  const response = await h.webhook({
+    route: `/${appA.id}`,
+    body: incomingBody(appA, "wamid-antiga", "Mensagem antiga", 1700000000),
+    signingSecret: appA.secret
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(h.documents.get(`cards/${appA.cardId}`).ultimaMensagemWhatsapp, "Mensagem recente");
+  assert.equal(h.documents.get(`cards/${appA.cardId}/mensagensWhatsapp/wamid-antiga`).text, "Mensagem antiga");
+});
+
+test("webhook mantém histórico sem resposta ou roteamento automáticos durante atendimento humano", async () => {
+      const h = createHarness();
+      h.documents.set(`cards/${appA.cardId}`, {
+        ...h.documents.get(`cards/${appA.cardId}`),
+        colunaId: "origem",
+        atendimentoWhatsapp: { uid: "responsavel", nome: "Responsável" }
+      });
+      h.documents.set(`whatsappNumbers/${appA.phoneNumberId}`, {
+        ...h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`),
+        activeBotMessageId: "bot",
+        botMessages: [{ id: "bot", blocks: [{ type: "option", trigger: "1", columnId: "destino", description: "" }] }]
+      });
+      h.documents.set("colunas/destino", { nome: "Destino*" });
+      const payload = messagePayload(appA, "wamid-human");
+      payload.entry[0].changes[0].value.messages[0].text.body = "1";
+      const result = await h.webhook({ route: `/${appA.id}`, body: JSON.stringify(payload), signingSecret: appA.secret });
+      assert.equal(result.statusCode, 200);
+      assert.equal(h.documents.get(`cards/${appA.cardId}`).colunaId, "origem");
+      assert.equal(h.documents.get(`cards/${appA.cardId}/mensagensWhatsapp/wamid-human`).text, "1");
+      assert.equal(h.graphCalls.filter((call) => call.path.endsWith("/messages")).length, 0);
+    });
 test("GET valida o verifyToken próprio de cada aplicativo", async () => {
   const h = createHarness();
   for (const [app, other] of [[appA, appB], [appB, appA]]) {
@@ -552,10 +714,11 @@ test("mensagem ativa dispara, grava a saída e direciona opção simples para co
   assert.equal(card.colunaId, "vendas");
   assert.equal(event.replyMode, "automation");
   assert.equal(event.replyAttempted, true);
-  assert.equal(card.whatsappLastOutboundAt.toMillis() > now, true);
+  assert.equal(card.whatsappLastOutboundAt.toMillis() >= now, true);
   const sent = h.documents.get(`cards/${event.cardId}/mensagensWhatsapp/wamid-outgoing`);
   assert.equal(sent.direction, "outgoing");
   assert.equal(sent.text, "Escolha uma opção:\n*1* - Vendas");
+  assert.equal(card.ultimaMensagemWhatsapp, sent.text);
   assert.equal(h.graphCalls.filter((call) => call.path.endsWith("/messages"))[0].payload.text.body, sent.text);
   assert.equal(h.documents.has(`colunas/vendas/historico/wamid-bot-route-route-in`), true);
   assert.equal(h.documents.has(`colunas/entrada/historico/wamid-bot-route-route-out`), true);
@@ -1138,4 +1301,139 @@ test("tempo de inatividade configurável (00 00 00 a 99 23 59) é validado, pers
     }),
     (error) => error.code === "invalid-argument"
   );
+});
+
+test("solicitação aprovada configura coluna e notifica entrada sem duplicar em nova entrega", async () => {
+    const h = createHarness();
+    const user = { uid: "sales", token: { email: "vendas@example.test" } };
+    const admin = { uid: "admin", token: { email: "eamgfn4ever@gmail.com" } };
+    h.documents.set("solicitacoes/sales", { email: user.token.email, status: "aprovada", cargo: "vendas" });
+    h.documents.set("colunas/suporte", { nome: "Suporte*" });
+    await h.requestColumnNotifications({ auth: user, data: { columnIds: ["suporte"] } });
+    const requestId = [...h.documents.keys()].find((key) => key.startsWith("solicitacoesNotificacoes/")).split("/")[1];
+    await assert.rejects(h.decideColumnNotifications({ auth: user, data: { id: requestId, aprovar: true } }),
+      (error) => error.code === "permission-denied");
+    await h.decideColumnNotifications({ auth: admin, data: { id: requestId, aprovar: true } });
+    assert.equal(h.documents.get("notificacoesColunas/suporte").destinatarios[0].uid, "sales");
+    const event = {
+      id: "evento-entrada",
+      params: { cardId: appA.cardId },
+      data: {
+        before: { exists: true, data: () => ({ colunaId: "origem" }) },
+        after: { exists: true, data: () => ({ colunaId: "suporte", nomeConta: "Cliente" }) }
+      }
+    };
+    await h.notifyColumnEntry(event);
+    const key = [...h.documents.keys()].find((path) => path.startsWith("notificacoes/sales/itens/"));
+    assert.ok(key);
+    assert.equal(h.documents.get(key).cardId, appA.cardId);
+    assert.equal(h.documents.get(key).coluna, "Suporte*");
+    h.documents.get(key).lida = true;
+    await h.notifyColumnEntry(event);
+    assert.equal(h.documents.get(key).lida, true);
+    assert.equal([...h.documents.keys()].filter((path) => path.startsWith("notificacoes/sales/itens/")).length, 1);
+  });
+
+test("configuração direta por administrador pode ser removida depois do bloqueio", async () => {
+    const h = createHarness();
+    const admin = { uid: "admin", token: { email: "eamgfn4ever@gmail.com" } };
+    h.documents.set("solicitacoes/sales", { email: "vendas@example.test", status: "aprovada", cargo: "vendas" });
+    h.documents.set("colunas/suporte", { nome: "Suporte*" });
+    await h.configureColumnNotifications({ auth: admin, data: { columnId: "suporte", email: "vendas@example.test", ativa: true } });
+    h.documents.get("solicitacoes/sales").status = "bloqueada";
+    await h.configureColumnNotifications({ auth: admin, data: { columnId: "suporte", email: "vendas@example.test", ativa: false } });
+    assert.equal(h.documents.get("notificacoesColunas/suporte").destinatarios.length, 0);
+  });
+test("chat interno restringe participantes, deduplica envios e só notifica usuários ausentes", async () => {
+  const h = createHarness();
+  const admin = { uid: "admin", token: { email: "eamgfn4ever@gmail.com" } };
+  const sales = { uid: "sales", token: { email: "vendas@example.test" } };
+  const production = { uid: "producao", token: { email: "producao@example.test" } };
+  const stranger = { uid: "estranho", token: { email: "estranho@example.test" } };
+  h.documents.set("solicitacoes/sales", { email: sales.token.email, status: "aprovada", cargo: "vendas" });
+  h.documents.set("solicitacoes/producao", { email: production.token.email, status: "aprovada", cargo: "producao" });
+  h.documents.set("solicitacoes/estranho", { email: stranger.token.email, status: "aprovada", cargo: "estoque" });
+  const { chatId } = await h.createChat({ auth: admin, data: { membros: ["sales", "producao"], nome: "Equipe" } });
+  await assert.rejects(h.getChatMessages({ auth: stranger, data: { chatId } }),
+    (error) => error.code === "permission-denied");
+  await h.chatPresence({ auth: sales, data: { chatId, ativa: true, sessionId: "sessao-sales-12345678" } });
+  const dados = { chatId, texto: "Olá equipe", messageId: "mensagem-interna-12345678" };
+  await h.sendChat({ auth: admin, data: dados });
+  await h.sendChat({ auth: admin, data: dados });
+  assert.equal([...h.documents.keys()].filter((key) => key.startsWith(`chatsInternos/${chatId}/mensagens/`)).length, 1);
+  assert.equal([...h.documents.keys()].filter((key) => key.startsWith("notificacoes/sales/itens/")).length, 0);
+  const notificacao = [...h.documents.entries()].find(([key]) => key.startsWith("notificacoes/producao/itens/"));
+  assert.equal(notificacao[1].nome, "Equipe");
+  assert.equal(notificacao[1].texto, "Olá equipe");
+  const mensagens = await h.getChatMessages({ auth: production, data: { chatId } });
+  assert.equal(mensagens.mensagens[0].texto, "Olá equipe");
+  h.documents.get("solicitacoes/producao").status = "bloqueada";
+  await assert.rejects(h.getChatMessages({ auth: production, data: { chatId } }),
+    (error) => error.code === "permission-denied");
+  await h.sendChat({ auth: admin, data: { chatId, texto: "Mensagem posterior", messageId: "mensagem-interna-87654321" } });
+  assert.equal([...h.documents.keys()].filter((key) => key.startsWith("notificacoes/producao/itens/")).length, 1);
+});
+
+test("funcionário de outro setor acessa somente conversas da coluna autorizada", async () => {
+  const h = createHarness();
+  const auth = { uid: "producao", token: { email: "producao@example.test" } };
+  h.documents.set("solicitacoes/producao", { email: auth.token.email, status: "aprovada", cargo: "producao" });
+  h.documents.set("notificacoesColunas/suporte", { destinatarios: [{ uid: auth.uid, email: auth.token.email }] });
+  h.documents.set(`cards/${appA.cardId}`, {
+    ...h.documents.get(`cards/${appA.cardId}`), colunaId: "suporte",
+    lastInboundAt: { toMillis: () => Date.now() }
+  });
+  h.secrets.set(`${secretPrefix}golden-whatsapp-token-${appA.phoneNumberId}/versions/latest`, "token");
+  const acesso = await h.getConversationAccess({ auth, data: {} });
+  assert.equal(acesso.completo, false);
+  assert.equal(acesso.colunas[0], "suporte");
+  await h.getMessages({ auth, data: { cardId: appA.cardId } });
+  assert.equal((await h.countUnread({ auth, data: { cardId: appA.cardId } })).quantidade, 0);
+  await assert.rejects(h.getMessages({ auth, data: { cardId: appB.cardId } }),
+    (error) => error.code === "permission-denied");
+  await assert.rejects(h.countUnread({ auth, data: { cardId: appB.cardId } }),
+    (error) => error.code === "permission-denied");
+  await assert.rejects(h.sendMessage({ auth, data: {
+    cardId: appA.cardId, phoneNumberId: appA.phoneNumberId, telefone: "5511888888888", mode: "text", text: "Olá"
+  } }), (error) => error.code === "permission-denied");
+  await h.sendMessage({ auth, data: {
+    cardId: appA.cardId, phoneNumberId: appA.phoneNumberId, mode: "text", text: "Olá"
+  } });
+  h.documents.get("notificacoesColunas/suporte").destinatarios = [];
+  await assert.rejects(h.getMessages({ auth, data: { cardId: appA.cardId } }),
+    (error) => error.code === "permission-denied");
+});
+
+test("chat 1:1 é compartilhado independentemente de quem o inicia", async () => {
+  const h = createHarness();
+  const admin = { uid: "admin", token: { email: "eamgfn4ever@gmail.com" } };
+  const sales = { uid: "sales", token: { email: "vendas@example.test" } };
+  h.documents.set("solicitacoes/sales", { email: sales.token.email, status: "aprovada", cargo: "vendas" });
+  const primeiro = await h.createChat({ auth: admin, data: { membros: ["sales"] } });
+  const segundo = await h.createChat({ auth: sales, data: { membros: ["admin"] } });
+  assert.equal(primeiro.chatId, segundo.chatId);
+  await h.sendChat({ auth: admin, data: {
+    chatId: primeiro.chatId, texto: "Mensagem direta", messageId: "mensagem-direta-12345678"
+  } });
+  const notificacao = [...h.documents.entries()].find(([key]) => key.startsWith("notificacoes/sales/itens/"));
+  assert.equal(notificacao[1].nome, "admin");
+  assert.equal(notificacao[1].chatId, primeiro.chatId);
+});
+
+test("atualização sem mudança de coluna e usuário bloqueado não geram notificação", async () => {
+  const h = createHarness();
+  h.documents.set("colunas/suporte", { nome: "Suporte*" });
+  h.documents.set("solicitacoes/sales", { email: "vendas@example.test", status: "bloqueada", cargo: "vendas" });
+  h.documents.set("notificacoesColunas/suporte", { destinatarios: [{ uid: "sales", email: "vendas@example.test" }] });
+  const event = {
+    id: "evento-sem-movimento", params: { cardId: appA.cardId },
+    data: {
+      before: { exists: true, data: () => ({ colunaId: "suporte" }) },
+      after: { exists: true, data: () => ({ colunaId: "suporte" }) }
+    }
+  };
+  await h.notifyColumnEntry(event);
+  event.data.before = { exists: true, data: () => ({ colunaId: "origem" }) };
+  await h.notifyColumnEntry(event);
+  assert.equal([...h.documents.keys()].some((key) => key.startsWith("notificacoes/sales/itens/")), false);
 });

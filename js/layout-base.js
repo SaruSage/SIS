@@ -5,15 +5,51 @@
 // ============================================================
 
 import { substituirIcones } from "./icones.js";
+import { iniciarNotificacoes } from "./notificacoes.js";
 
 const CHAVE_SIDEBAR = "golden-sidebar-recolhida";
 
 export function iniciarLayoutBase() {
   aplicarPreferencias();
+  iniciarNavegacaoConversas();
+  iniciarNotificacoes();
   substituirIcones();
   iniciarSidebar();
   iniciarCaixasHeader();
   iniciarBotaoConfig();
+}
+
+function iniciarNavegacaoConversas() {
+  const nav = document.querySelector(".sidebar-nav");
+  if (!nav) return;
+  let secao = nav.querySelector(".sidebar-secao");
+  if (!secao) {
+    const divisor = document.createElement("div");
+    divisor.className = "sidebar-divisor";
+    secao = document.createElement("div");
+    secao.className = "sidebar-secao";
+    secao.innerHTML =
+      '<a href="vendas.html" class="nav-item" data-cargos="vendas"><span class="nav-icone" data-icone="kanban"></span><span class="nav-label">Kan Ban</span></a>' +
+      '<a href="conexoes.html" class="nav-item" data-cargos="vendas"><span class="nav-icone" data-icone="conexoes"></span><span class="nav-label">Conexões</span></a>';
+    nav.append(divisor, secao);
+  }
+  [
+    { href: "conversas.html", titulo: "Conversas", icone: "acessar" },
+    { href: "chats-internos.html", titulo: "Chats Internos", icone: "pessoa" }
+  ].forEach((item) => {
+    if (secao.querySelector('a[href="' + item.href + '"]')) return;
+    const link = document.createElement("a");
+    link.href = item.href;
+    link.className = "nav-item";
+    link.setAttribute("aria-label", item.titulo);
+    if (item.cargos) link.dataset.cargos = item.cargos;
+    if (window.location.pathname.endsWith("/" + item.href)) {
+      link.classList.add("ativo");
+      link.setAttribute("aria-current", "page");
+    }
+    link.innerHTML = '<span class="nav-icone" data-icone="' + item.icone + '"></span><span class="nav-label">' + item.titulo + '</span>';
+    secao.insertBefore(link, secao.querySelector('a[href="conexoes.html"]'));
+  });
 }
 
 // ------------------------------------------------------------
@@ -101,8 +137,7 @@ function iniciarCaixasHeader() {
       const abrir = !caixaNotif.classList.contains("aberta");
       if (caixaPerfil) caixaPerfil.classList.remove("aberta");
       caixaNotif.classList.toggle("aberta", abrir);
-      const selo = document.getElementById("selo-notificacao");
-      if (abrir && selo) selo.classList.remove("visivel");
+      botaoNotif.setAttribute("aria-expanded", String(abrir));
     });
   }
 
@@ -111,6 +146,7 @@ function iniciarCaixasHeader() {
       e.stopPropagation();
       const abrir = !caixaPerfil.classList.contains("aberta");
       if (caixaNotif) caixaNotif.classList.remove("aberta");
+      if (botaoNotif) botaoNotif.setAttribute("aria-expanded", "false");
       caixaPerfil.classList.toggle("aberta", abrir);
     });
   }
@@ -128,6 +164,7 @@ function iniciarCaixasHeader() {
     if (caixaNotif && !caixaNotif.contains(e.target) &&
         !botaoNotif?.contains(e.target)) {
       caixaNotif.classList.remove("aberta");
+      if (botaoNotif) botaoNotif.setAttribute("aria-expanded", "false");
     }
     if (caixaPerfil && !caixaPerfil.contains(e.target) &&
         !botaoPerfil?.contains(e.target)) {

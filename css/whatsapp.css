@@ -34,6 +34,12 @@
   font-size: 13px;
 }
 
+.whatsapp-mensagem-atendente {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.75rem;
+}
+
 .whatsapp-mensagem small {
   display: block;
   color: var(--texto-sec);

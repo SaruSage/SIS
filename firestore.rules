@@ -31,8 +31,27 @@ service cloud.firestore {
       allow update, delete: if administradorPrincipal();
     }
 
+    match /leiturasConversas/{usuario}/cards/{card} {
+      allow read: if request.auth != null && request.auth.uid == usuario;
+      allow write: if false;
+    }
+
+    match /notificacoes/{usuario}/itens/{notificacao} {
+      allow read: if request.auth != null && request.auth.uid == usuario;
+      allow update: if request.auth != null && request.auth.uid == usuario &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(["lida"]) &&
+        request.resource.data.lida == true;
+      allow create, delete: if false;
+    }
+
     function colecaoRestrita(colecao) {
       return colecao == "solicitacoes" ||
+        colecao == "leiturasConversas" ||
+        colecao == "notificacoes" ||
+        colecao == "notificacoesColunas" ||
+        colecao == "solicitacoesNotificacoes" ||
+        colecao == "chatsInternos" ||
+        colecao == "presencasChats" ||
         colecao == "whatsappNumbers" ||
         colecao == "whatsappJobs" ||
         colecao == "whatsappWebhookEvents";

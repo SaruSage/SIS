@@ -277,16 +277,39 @@ body.tema-escuro .sidebar-divisor {
 
 .selo-notificacao {
   position: absolute;
-  top: 7px;
-  right: 8px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #ff5252;
+  bottom: -3px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  border-radius: 9px;
+  color: #1c1917;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
   display: none;
 }
 
 .selo-notificacao.visivel { display: block; }
+.selo-notificacao.amarelo { background: #eab308; }
+.selo-notificacao.vermelho { background: #ef4444; }
+
+.caixa-header.painel-notificacoes { width: min(440px, 90vw); max-height: 70vh; overflow-y: auto; }
+.notificacoes-topo { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.notificacoes-marcar, .notificacao-lateral button { border: 0; background: transparent; color: var(--azul); cursor: pointer; font: inherit; }
+.notificacoes-marcar { font-size: 11px; }
+.notificacoes-erro { color: #ef4444; font-size: 12px; }
+.painel-notificacoes li.notificacao-item { display: flex; gap: 9px; align-items: flex-start; color: var(--texto); border-bottom: 1px solid var(--borda); }
+.painel-notificacoes li.notificacao-item:hover { background: var(--fundo); }
+.notificacao-item.nao-lida { background: var(--fundo); }
+.notificacao-item[role="link"] { cursor: pointer; }
+.notificacao-icone { flex: 0 0 30px; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: var(--azul); background: var(--fundo); }
+.notificacao-conteudo { flex: 1; min-width: 0; }
+.notificacao-resumo { margin: 3px 0 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.notificacao-resumo.expandido { display: block; }
+.notificacao-lateral { display: flex; align-items: flex-start; gap: 3px; flex: 0 0 92px; justify-content: flex-end; text-align: right; }
+.notificacao-lateral time { color: var(--texto-sec); font-size: 10px; }
 
 /* ---------- CAIXAS FLUTUANTES DO HEADER ---------- */
 .caixa-header {

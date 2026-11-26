@@ -714,7 +714,9 @@ function criarCard(card, coluna) {
   botaoAcessar.type = "button";
   botaoAcessar.className = "botao-card botao-card-primario";
   botaoAcessar.innerHTML = '<span data-icone="acessar" data-tamanho="12"></span> Acessar';
-  botaoAcessar.addEventListener("click", () => acessarConversa(card));
+  botaoAcessar.addEventListener("click", () => {
+    window.location.href = "conversas.html?card=" + encodeURIComponent(card.id);
+  });
   rodape.appendChild(botaoAcessar);
 
   div.appendChild(rodape);
@@ -1180,144 +1182,6 @@ async function moverCard(cardId, colunaDestinoId) {
   } catch (erro) {
     mostrarMensagem("Erro ao mover o card.", "erro");
   }
-}
-
-// ------------------------------------------------------------
-// CONVERSA INTEGRADA PELA API OFICIAL DO WHATSAPP
-// ------------------------------------------------------------
-async function acessarConversa(card) {
-  if (!card.telefone) {
-    mostrarMensagem("Este card não tem telefone cadastrado.", "erro");
-    return;
-  }
-  const caixa = document.createElement("div");
-  caixa.className = "modal-interno whatsapp-conversa";
-  const titulo = document.createElement("h3");
-  titulo.textContent = "Conversa com " + (card.nomeConta || card.telefone);
-  caixa.appendChild(titulo);
-  const lista = document.createElement("div");
-  lista.className = "whatsapp-conversa-lista";
-  lista.textContent = "Carregando mensagens...";
-  caixa.appendChild(lista);
-  const formulario = document.createElement("form");
-  formulario.className = "whatsapp-conversa-form";
-  formulario.innerHTML =
-    "<label>Número de origem<select id='conversa-numero' required></select></label>" +
-    "<label>Tipo de mensagem<select id='conversa-tipo'><option value='text'>Mensagem de texto (janela de 24h)</option><option value='template'>Modelo aprovado</option></select></label>" +
-    "<label class='conversa-texto-wrap'>Mensagem<textarea id='conversa-texto' rows='3' maxlength='4096'></textarea></label>" +
-    "<div class='conversa-template-wrap' hidden>" +
-      "<label>Nome do modelo aprovado<input id='conversa-template' placeholder='nome_do_modelo'></label>" +
-      "<label>Idioma do modelo<input id='conversa-idioma' value='pt_BR'></label>" +
-      "<label>Parâmetros do corpo (um por linha)<textarea id='conversa-variaveis' rows='2'></textarea></label>" +
-    "</div>";
-  const mensagemStatus = document.createElement("p");
-  mensagemStatus.className = "texto-ajuda";
-  formulario.appendChild(mensagemStatus);
-  const linha = document.createElement("div");
-  linha.className = "linha-botoes-modal";
-  const fechar = document.createElement("button");
-  fechar.type = "button";
-  fechar.textContent = "Fechar";
-  fechar.className = "botao-modal botao-modal-secundario";
-  fechar.addEventListener("click", fecharModal);
-  const enviar = document.createElement("button");
-  enviar.type = "submit";
-  enviar.textContent = "Enviar pelo WhatsApp";
-  enviar.className = "botao-modal";
-  linha.append(fechar, enviar);
-  formulario.appendChild(linha);
-  caixa.appendChild(formulario);
-  abrirModal(caixa);
-
-  const tipo = formulario.querySelector("#conversa-tipo");
-  const templateWrap = formulario.querySelector(".conversa-template-wrap");
-  const textoWrap = formulario.querySelector(".conversa-texto-wrap");
-  const inboundMs = card.lastInboundAt && card.lastInboundAt.toMillis
-    ? card.lastInboundAt.toMillis()
-    : card.lastInboundAt && card.lastInboundAt.seconds
-      ? card.lastInboundAt.seconds * 1000
-      : 0;
-  if (!inboundMs || Date.now() - inboundMs > 24 * 60 * 60 * 1000) {
-    tipo.value = "template";
-    templateWrap.hidden = false;
-    textoWrap.hidden = true;
-  }
-  tipo.addEventListener("change", () => {
-    const usaModelo = tipo.value === "template";
-    templateWrap.hidden = !usaModelo;
-    textoWrap.hidden = usaModelo;
-  });
-
-  try {
-    const [resultadoMensagens, resultadoNumeros] = await Promise.all([
-      httpsCallable(functions, "getWhatsAppMessages")({ cardId: card.id }),
-      httpsCallable(functions, "getWhatsAppConnections")({})
-    ]);
-    const mensagens = resultadoMensagens.data.messages || [];
-    const numeros = (resultadoNumeros.data.numbers || []).filter((numero) => numero.active);
-    const seletor = formulario.querySelector("#conversa-numero");
-    seletor.replaceChildren(new Option("Selecione um número", ""));
-    numeros.forEach((numero) => seletor.add(new Option(numero.displayPhoneNumber || numero.phoneNumberId, numero.phoneNumberId)));
-    if (numeros.some((numero) => numero.phoneNumberId === card.whatsappPhoneNumberId)) {
-      seletor.value = card.whatsappPhoneNumberId;
-    } else if (numeros.length === 1) {
-      seletor.value = numeros[0].phoneNumberId;
-    }
-
-    lista.replaceChildren();
-    if (!mensagens.length) {
-      lista.textContent = "Ainda não há mensagens recebidas pela integração.";
-    } else {
-      mensagens.forEach((mensagem) => {
-        const linhaMensagem = document.createElement("div");
-        linhaMensagem.className = "whatsapp-mensagem " + (mensagem.direction === "outgoing" ? "whatsapp-mensagem-saida" : "whatsapp-mensagem-entrada");
-        const corpo = document.createElement("p");
-        corpo.textContent = mensagem.text || "[Mensagem sem texto]";
-        linhaMensagem.appendChild(corpo);
-        const hora = document.createElement("small");
-        hora.textContent = (mensagem.timestamp ? new Date(mensagem.timestamp).toLocaleString("pt-BR") : "") +
-          (mensagem.status ? " · " + mensagem.status : "");
-        linhaMensagem.appendChild(hora);
-        lista.appendChild(linhaMensagem);
-      });
-    }
-  } catch (erro) {
-    lista.textContent = "Não foi possível carregar as mensagens: " + (erro.message || "erro desconhecido");
-  }
-
-  formulario.addEventListener("submit", async (evento) => {
-    evento.preventDefault();
-    const phoneNumberId = formulario.querySelector("#conversa-numero").value;
-    const mode = tipo.value;
-    const dados = {
-      cardId: card.id,
-      phoneNumberId,
-      mode,
-      text: formulario.querySelector("#conversa-texto").value.trim(),
-      templateName: formulario.querySelector("#conversa-template").value.trim(),
-      templateLanguage: formulario.querySelector("#conversa-idioma").value.trim() || "pt_BR",
-      templateVariables: formulario.querySelector("#conversa-variaveis").value
-    };
-    if (!phoneNumberId) {
-      mensagemStatus.textContent = "Selecione um número vinculado.";
-      return;
-    }
-    enviar.disabled = true;
-    mensagemStatus.textContent = "Enviando pela API oficial...";
-    try {
-      await httpsCallable(functions, "sendWhatsAppMessage")(dados);
-      mensagemStatus.textContent = "Mensagem aceita pela Meta.";
-      formulario.querySelector("#conversa-texto").value = "";
-      await registrarHistoricoCard(card.id, "mensagemWhatsapp", { tipo: mode });
-      fecharModal();
-      await acessarConversa(card);
-    } catch (erro) {
-      mensagemStatus.textContent = erro.message || "Falha ao enviar mensagem.";
-    } finally {
-      enviar.disabled = false;
-    }
-  });
-  await registrarHistoricoCard(card.id, "acesso", {});
 }
 
 // ------------------------------------------------------------

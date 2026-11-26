@@ -3,6 +3,7 @@
 const crypto = require("node:crypto");
 const { SecretManagerServiceClient } = require("@google-cloud/secret-manager");
 const { initializeApp } = require("firebase-admin/app");
+const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
 const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
@@ -76,6 +77,42 @@ async function assertAdmin(request) {
     throw new HttpsError("permission-denied", "Somente o administrador pode alterar números vinculados e a captação.");
   }
 }
+
+async function obterAcessoConversas(request) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Faça login para continuar.");
+  const email = normalizeEmail(request.auth.token.email);
+  let completo = ADMIN_EMAILS.includes(email);
+  if (!completo) {
+    const solicitacoes = await db.collection("solicitacoes").get();
+    const cadastro = solicitacoes.docs.find((doc) =>
+      normalizeEmail(doc.data().email) === email && doc.data().status === "aprovada");
+    if (!cadastro) throw new HttpsError("permission-denied", "Acesso restrito a funcionários aprovados.");
+    completo = ALLOWED_SALES_ROLES.includes(cadastro.data().cargo);
+  }
+  const configuracoes = await db.collection("notificacoesColunas").get();
+  return {
+    completo,
+    colunas: configuracoes.docs.filter((doc) =>
+      Array.isArray(doc.data().destinatarios) &&
+      doc.data().destinatarios.some((item) => item.uid === request.auth.uid && normalizeEmail(item.email) === email)
+    ).map((doc) => doc.id)
+  };
+}
+
+async function autorizarConversa(request, cardId) {
+  const acesso = await obterAcessoConversas(request);
+  if (acesso.completo) return acesso;
+  if (!cardId || typeof cardId !== "string" || cardId.includes("/")) {
+    throw new HttpsError("permission-denied", "Esta conta só pode acessar conversas das colunas autorizadas.");
+  }
+  const card = await db.collection("cards").doc(cardId).get();
+  if (!card.exists || card.data().excluido || !acesso.colunas.includes(card.data().colunaId)) {
+    throw new HttpsError("permission-denied", "Você não tem acesso a esta conversa.");
+  }
+  return acesso;
+}
+
+exports.listarAcessoConversas = onCall({ region: REGION }, async (request) => obterAcessoConversas(request));
 
 function secretPath(secretId) {
   const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT;
@@ -554,6 +591,7 @@ async function processScheduledJob(jobSnapshot) {
   if (!claimed) return;
 
   let apiMessageId = claimed.accepted ? claimed.apiMessageId : null;
+  let enviadoEm = claimed.accepted ? claimed.aceitoPelaMetaEm : null;
   try {
     const cardRef = db.collection("cards").doc(claimed.cardId);
     const cardSnapshot = await cardRef.get();
@@ -572,6 +610,7 @@ async function processScheduledJob(jobSnapshot) {
     if (!claimed.accepted) {
       await assertTextWindow(card, claimed.mode);
       apiMessageId = await sendGraphMessage(number, normalizePhone(card.telefone), payload);
+      enviadoEm = Timestamp.fromMillis(Date.now());
     }
     if (!claimed.accepted) {
       await jobRef.update({
@@ -609,7 +648,9 @@ async function processScheduledJob(jobSnapshot) {
       cardUpdate.entregaColunaEm = FieldValue.serverTimestamp();
       cardUpdate.entregaColunaErro = FieldValue.delete();
     }
-    await cardRef.update(cardUpdate);
+    await atualizarCardComPrevia(cardRef, cardUpdate,
+      payload.type === "text" ? payload.text.body : "Modelo: " + payload.template.name,
+      enviadoEm);
     await jobRef.update({
       status: "sent",
       apiMessageId,
@@ -661,9 +702,21 @@ async function firstColumnId() {
 }
 
 exports.getWhatsAppConnections = onCall({ region: REGION }, async (request) => {
-  await assertAuthorized(request);
+  const acesso = await obterAcessoConversas(request);
   const snapshot = await db.collection("whatsappNumbers").get();
-  return { numbers: snapshot.docs.map(publicNumber).sort((a, b) => a.displayPhoneNumber.localeCompare(b.displayPhoneNumber)) };
+  let numbers = snapshot.docs.map(publicNumber);
+  if (!acesso.completo) {
+    const cards = await db.collection("cards").get();
+    const ids = new Set(cards.docs.filter((doc) => !doc.data().excluido && acesso.colunas.includes(doc.data().colunaId))
+      .map((doc) => doc.data().whatsappPhoneNumberId).filter(Boolean));
+    numbers = numbers.filter((number) => ids.has(number.phoneNumberId)).map((number) => ({
+      phoneNumberId: number.phoneNumberId,
+      displayPhoneNumber: number.displayPhoneNumber,
+      displayName: number.displayName,
+      active: number.active
+    }));
+  }
+  return { numbers: numbers.sort((a, b) => a.displayPhoneNumber.localeCompare(b.displayPhoneNumber)) };
 });
 
 exports.connectWhatsAppNumber = onCall({ region: REGION, timeoutSeconds: 120 }, async (request) => {
@@ -933,8 +986,8 @@ exports.saveWhatsAppAutomation = onCall({ region: REGION }, async (request) => {
 });
 
 exports.sendWhatsAppMessage = onCall({ region: REGION, timeoutSeconds: 120 }, async (request) => {
-  await assertAuthorized(request);
   const data = request.data || {};
+  const acesso = await autorizarConversa(request, data.cardId);
   const phoneNumberId = String(data.phoneNumberId || "");
   const number = await loadActiveNumber(phoneNumberId);
   const payload = montarPayloadMensagem(data);
@@ -954,7 +1007,10 @@ exports.sendWhatsAppMessage = onCall({ region: REGION, timeoutSeconds: 120 }, as
       if (!/^\d{8,15}$/.test(cardPhone)) throw new HttpsError("failed-precondition", "O card não tem um telefone válido.");
     }
   }
-  const recipient = phone || normalizePhone(card.telefone);
+  const recipient = phone || normalizePhone(card && card.telefone);
+  if (!acesso.completo && (phone || !acesso.colunas.includes(card.colunaId) || number.id !== card.whatsappPhoneNumberId)) {
+    throw new HttpsError("permission-denied", "Use o número e o contato vinculados à conversa autorizada.");
+  }
   if (!/^\d{8,15}$/.test(recipient)) {
     throw new HttpsError("invalid-argument", "Informe um telefone com código do país e DDD.");
   }
@@ -968,6 +1024,7 @@ exports.sendWhatsAppMessage = onCall({ region: REGION, timeoutSeconds: 120 }, as
   } catch (erro) {
     throw new HttpsError("failed-precondition", erro.message);
   }
+  const enviadoEm = Timestamp.fromMillis(Date.now());
 
   if (!card) {
     const now = FieldValue.serverTimestamp();
@@ -1001,13 +1058,17 @@ exports.sendWhatsAppMessage = onCall({ region: REGION, timeoutSeconds: 120 }, as
     apiMessageId,
     status: "sent",
     phoneNumberId: number.id,
-    automatico: false
+    automatico: false,
+    atendente: {
+      uid: request.auth.uid,
+      nome: request.auth.token.name || request.auth.token.email || request.auth.uid
+    }
   }, apiMessageId);
-  await cardRef.update({
+  await atualizarCardComPrevia(cardRef, {
     whatsappPhoneNumberId: number.id,
     ultimaAtividade: FieldValue.serverTimestamp(),
     whatsappLastOutboundAt: FieldValue.serverTimestamp()
-  });
+  }, payload.type === "text" ? payload.text.body : "Modelo: " + payload.template.name, enviadoEm);
   return { success: true, cardId: cardRef.id, apiMessageId };
 });
 
@@ -1061,13 +1122,30 @@ exports.scheduleWhatsAppMessage = onCall({ region: REGION }, async (request) => 
   return { success: true };
 });
 
+function dataUltimaMensagem(card) {
+  return timestampMillis(card.ultimaMensagemWhatsappEm) ||
+    Math.max(timestampMillis(card.lastInboundAt), timestampMillis(card.whatsappLastOutboundAt));
+}
+
+async function atualizarCardComPrevia(ref, alteracoes, texto, enviadoEm) {
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists) throw new Error("O card da conversa não existe mais.");
+    if (timestampMillis(enviadoEm) && timestampMillis(enviadoEm) >= dataUltimaMensagem(snapshot.data())) {
+      alteracoes.ultimaMensagemWhatsapp = texto.slice(0, 300);
+      alteracoes.ultimaMensagemWhatsappEm = enviadoEm;
+    }
+    transaction.update(ref, alteracoes);
+  });
+}
+
 exports.getWhatsAppMessages = onCall({ region: REGION }, async (request) => {
-  await assertAuthorized(request);
-  const cardId = String(request.data.cardId || "");
+  const cardId = String((request.data || {}).cardId || "");
+  await autorizarConversa(request, cardId);
   const cardSnapshot = await db.collection("cards").doc(cardId).get();
   if (!cardSnapshot.exists) throw new HttpsError("not-found", "Conversa não encontrada.");
   const snapshot = await db.collection("cards").doc(cardId)
-    .collection("mensagensWhatsapp").orderBy("criadoEm", "desc").limit(100).get();
+    .collection("mensagensWhatsapp").orderBy("criadoEm", "desc").get();
   return {
     messages: snapshot.docs.map((documento) => {
       const dados = documento.data();
@@ -1077,10 +1155,432 @@ exports.getWhatsAppMessages = onCall({ region: REGION }, async (request) => {
         type: dados.type || "text",
         text: dados.text || "",
         status: dados.status || "",
+        atendente: dados.atendente || null,
         timestamp: dados.criadoEm && dados.criadoEm.toMillis ? dados.criadoEm.toMillis() : null
       };
     }).reverse()
   };
+});
+
+exports.contarNaoLidasWhatsApp = onCall({ region: REGION }, async (request) => {
+  const cardId = String((request.data || {}).cardId || "");
+  await autorizarConversa(request, cardId);
+  if (!cardId || cardId.includes("/")) {
+    throw new HttpsError("invalid-argument", "Informe uma conversa válida.");
+  }
+  const cardRef = db.collection("cards").doc(cardId);
+  const card = await cardRef.get();
+  if (!card.exists || card.data().excluido) {
+    throw new HttpsError("not-found", "Conversa não encontrada.");
+  }
+  const leitura = await db.collection("leiturasConversas").doc(request.auth.uid)
+    .collection("cards").doc(cardId).get();
+  const ultimaEntrada = leitura.exists && leitura.data().ultimaEntrada;
+  const mensagens = cardRef.collection("mensagensWhatsapp");
+  if (!timestampMillis(ultimaEntrada)) {
+    const total = await mensagens.where("direction", "==", "incoming").count().get();
+    return { quantidade: total.data().count };
+  }
+  const posteriores = await mensagens.where("criadoEm", ">", ultimaEntrada).get();
+  return { quantidade: posteriores.docs.filter((doc) => doc.data().direction === "incoming").length };
+});
+
+exports.definirAtendimentoWhatsApp = onCall({ region: REGION }, async (request) => {
+  const cardId = String((request.data || {}).cardId || "");
+  await autorizarConversa(request, cardId);
+  const acao = (request.data || {}).acao;
+  if (!cardId || cardId.includes("/") || !["assumir", "liberar"].includes(acao)) {
+    throw new HttpsError("invalid-argument", "Informe a conversa e a ação desejada.");
+  }
+  const ref = db.collection("cards").doc(cardId);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists || snapshot.data().excluido) {
+      throw new HttpsError("not-found", "Conversa não encontrada.");
+    }
+    const atual = snapshot.data().atendimentoWhatsapp;
+    if (atual && atual.uid !== request.auth.uid) {
+      if (acao !== "liberar") {
+        throw new HttpsError("failed-precondition", "Esta conversa já está sob atendimento de outro usuário.");
+      }
+      await assertAdmin(request);
+    }
+    transaction.update(ref, {
+      atendimentoWhatsapp: acao === "assumir" ? {
+        uid: request.auth.uid,
+        nome: request.auth.token.name || request.auth.token.email || request.auth.uid
+      } : null
+    });
+  });
+  return { success: true };
+});
+
+exports.marcarConversaWhatsAppLida = onCall({ region: REGION }, async (request) => {
+  const cardId = String((request.data || {}).cardId || "");
+  await autorizarConversa(request, cardId);
+  const entradaExibida = (request.data || {}).ultimaEntradaMillis;
+  if (!cardId || cardId.includes("/") || !Number.isSafeInteger(entradaExibida) || entradaExibida <= 0) {
+    throw new HttpsError("invalid-argument", "Informe a conversa e a última mensagem exibida.");
+  }
+  const ref = db.collection("cards").doc(cardId);
+  const leituraRef = db.collection("leiturasConversas").doc(request.auth.uid)
+    .collection("cards").doc(cardId);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists || snapshot.data().excluido) {
+      throw new HttpsError("not-found", "Conversa não encontrada.");
+    }
+    const ultimaEntrada = snapshot.data().lastInboundAt || null;
+    if (timestampMillis(ultimaEntrada) !== entradaExibida) {
+      throw new HttpsError("failed-precondition", "Há novas mensagens; atualize o histórico antes de marcar como lida.");
+    }
+    transaction.set(leituraRef, { ultimaEntrada });
+    transaction.update(ref, { whatsappLidaAte: ultimaEntrada });
+  });
+  return { success: true };
+});
+
+async function destinatarioNotificacao(email) {
+  const normalizado = normalizeEmail(email);
+  if (!normalizado) throw new HttpsError("invalid-argument", "Informe o e-mail do usuário.");
+  const solicitacoes = await db.collection("solicitacoes").get();
+  const aprovado = ADMIN_EMAILS.includes(normalizado) || solicitacoes.docs.some((doc) => {
+    const dados = doc.data();
+    return normalizeEmail(dados.email) === normalizado && dados.status === "aprovada";
+  });
+  if (!aprovado) throw new HttpsError("failed-precondition", "O usuário precisa ter acesso aprovado ao SIS.");
+  let conta;
+  try {
+    conta = await getAuth().getUserByEmail(normalizado);
+  } catch (erro) {
+    if (erro.code === "auth/user-not-found") throw new HttpsError("not-found", "Conta do usuário não encontrada.");
+    throw erro;
+  }
+  if (conta.disabled) throw new HttpsError("failed-precondition", "A conta do usuário está desativada.");
+  return { uid: conta.uid, email: normalizado, nome: conta.displayName || normalizado };
+}
+
+exports.configurarNotificacaoColuna = onCall({ region: REGION }, async (request) => {
+  await assertAdmin(request);
+  const dados = request.data || {};
+  const columnId = String(dados.columnId || "");
+  if (!columnId || columnId.includes("/") || typeof dados.ativa !== "boolean" || !normalizeEmail(dados.email)) {
+    throw new HttpsError("invalid-argument", "Informe a coluna e a configuração.");
+  }
+  const usuario = dados.ativa ? await destinatarioNotificacao(dados.email) : { email: normalizeEmail(dados.email) };
+  const coluna = db.collection("colunas").doc(columnId);
+  const config = db.collection("notificacoesColunas").doc(columnId);
+  await db.runTransaction(async (transaction) => {
+    const colunaSnap = await transaction.get(coluna);
+    const configSnap = await transaction.get(config);
+    if (!colunaSnap.exists) throw new HttpsError("not-found", "Coluna não encontrada.");
+    const destinatarios = configSnap.exists && Array.isArray(configSnap.data().destinatarios)
+      ? configSnap.data().destinatarios.filter((item) =>
+        normalizeEmail(item.email) !== usuario.email && (!usuario.uid || item.uid !== usuario.uid)) : [];
+    if (dados.ativa) destinatarios.push(usuario);
+    transaction.set(config, { destinatarios });
+  });
+  return { success: true };
+});
+
+exports.solicitarNotificacoesColunas = onCall({ region: REGION }, async (request) => {
+  await assertChatMember(request);
+  const ids = (request.data || {}).columnIds;
+  if (!Array.isArray(ids) || !ids.length || ids.length > 50 ||
+      ids.some((id) => typeof id !== "string" || !id || id.includes("/")) ||
+      new Set(ids).size !== ids.length) {
+    throw new HttpsError("invalid-argument", "Selecione de 1 a 50 colunas diferentes.");
+  }
+  const usuario = await destinatarioNotificacao(request.auth.token.email);
+  if (usuario.uid !== request.auth.uid) throw new HttpsError("permission-denied", "A conta autenticada não corresponde ao usuário.");
+  const colunas = await Promise.all(ids.map((id) => db.collection("colunas").doc(id).get()));
+  if (colunas.some((coluna) => !coluna.exists)) throw new HttpsError("not-found", "Uma das colunas não existe mais.");
+  const ref = db.collection("solicitacoesNotificacoes").doc();
+  await ref.set({
+    usuario,
+    colunas: colunas.map((coluna) => ({ id: coluna.id, nome: coluna.data().nome || coluna.id })),
+    status: "pendente",
+    criadoEm: FieldValue.serverTimestamp()
+  });
+  return { success: true };
+});
+
+exports.listarNotificacoesColunas = onCall({ region: REGION }, async (request) => {
+  await assertAdmin(request);
+  const [configs, solicitacoes] = await Promise.all([
+    db.collection("notificacoesColunas").get(),
+    db.collection("solicitacoesNotificacoes").where("status", "==", "pendente").get()
+  ]);
+  return {
+    configs: configs.docs.map((doc) => ({ columnId: doc.id, destinatarios: doc.data().destinatarios || [] })),
+    solicitacoes: solicitacoes.docs.map((doc) => ({ id: doc.id, usuario: doc.data().usuario, colunas: doc.data().colunas }))
+  };
+});
+
+exports.decidirNotificacoesColunas = onCall({ region: REGION }, async (request) => {
+  await assertAdmin(request);
+  const dados = request.data || {};
+  const id = String(dados.id || "");
+  if (!id || id.includes("/") || typeof dados.aprovar !== "boolean") {
+    throw new HttpsError("invalid-argument", "Informe a solicitação e a decisão.");
+  }
+  const ref = db.collection("solicitacoesNotificacoes").doc(id);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) throw new HttpsError("not-found", "Solicitação não encontrada.");
+  const usuario = dados.aprovar ? await destinatarioNotificacao(snapshot.data().usuario.email) : snapshot.data().usuario;
+  if (usuario.uid !== snapshot.data().usuario.uid) throw new HttpsError("failed-precondition", "A conta solicitante foi alterada.");
+  await db.runTransaction(async (transaction) => {
+    const atual = await transaction.get(ref);
+    if (!atual.exists || atual.data().status !== "pendente") {
+      throw new HttpsError("failed-precondition", "Esta solicitação já foi decidida.");
+    }
+    const ids = atual.data().colunas.map((item) => item.id);
+    const refs = ids.map((columnId) => db.collection("notificacoesColunas").doc(columnId));
+    const colunas = await Promise.all(ids.map((columnId) => transaction.get(db.collection("colunas").doc(columnId))));
+    const configs = await Promise.all(refs.map((config) => transaction.get(config)));
+    if (dados.aprovar && colunas.some((coluna) => !coluna.exists)) {
+      throw new HttpsError("failed-precondition", "Uma das colunas solicitadas não existe mais.");
+    }
+    if (dados.aprovar) refs.forEach((config, index) => {
+      const lista = configs[index].exists && Array.isArray(configs[index].data().destinatarios)
+        ? configs[index].data().destinatarios.filter((item) => item.uid !== usuario.uid) : [];
+      lista.push(usuario);
+      transaction.set(config, { destinatarios: lista });
+    });
+    transaction.update(ref, { status: dados.aprovar ? "aprovada" : "rejeitada", decididoPor: request.auth.uid, decididoEm: FieldValue.serverTimestamp() });
+  });
+  return { success: true };
+});
+
+exports.notificarEntradaColuna = onDocumentWritten(
+  { document: "cards/{cardId}", region: REGION, retry: true },
+  async (event) => {
+    const antes = event.data.before.exists ? event.data.before.data() : null;
+    const depois = event.data.after.exists ? event.data.after.data() : null;
+    if (!depois || depois.excluido || !depois.colunaId || (antes && antes.colunaId === depois.colunaId)) return;
+    if (!event.id) throw new Error("Evento sem identificador para deduplicação.");
+    const [config, coluna, solicitacoes] = await Promise.all([
+      db.collection("notificacoesColunas").doc(depois.colunaId).get(),
+      db.collection("colunas").doc(depois.colunaId).get(),
+      db.collection("solicitacoes").get()
+    ]);
+    if (!config.exists || !coluna.exists) return;
+    const destinatarios = Array.isArray(config.data().destinatarios) ? config.data().destinatarios : [];
+    for (const usuario of destinatarios) {
+      const permitido = ADMIN_EMAILS.includes(normalizeEmail(usuario.email)) || solicitacoes.docs.some((doc) => {
+        const dados = doc.data();
+        return normalizeEmail(dados.email) === normalizeEmail(usuario.email) && dados.status === "aprovada";
+      });
+      if (!permitido || !usuario.uid) continue;
+      const id = crypto.createHash("sha256").update(event.id + ":" + usuario.uid).digest("hex");
+      const ref = db.collection("notificacoes").doc(usuario.uid).collection("itens").doc(id);
+      await db.runTransaction(async (transaction) => {
+        const anterior = await transaction.get(ref);
+        if (anterior.exists) return;
+        transaction.set(ref, {
+          tipo: "coluna", cardId: event.params.cardId,
+          nome: depois.nomeConta || depois.telefone || "Contato",
+          coluna: coluna.data().nome || "Coluna",
+          criadoEm: FieldValue.serverTimestamp(), lida: false
+        });
+      });
+    }
+  }
+);
+
+async function assertChatMember(request) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Faça login para continuar.");
+  const email = normalizeEmail(request.auth.token.email);
+  if (ADMIN_EMAILS.includes(email)) return;
+  const snapshot = await db.collection("solicitacoes").get();
+  if (!snapshot.docs.some((doc) => normalizeEmail(doc.data().email) === email && doc.data().status === "aprovada")) {
+    throw new HttpsError("permission-denied", "Acesso restrito a funcionários aprovados.");
+  }
+}
+
+exports.listarMembrosChat = onCall({ region: REGION }, async (request) => {
+  await assertChatMember(request);
+  const snapshot = await db.collection("solicitacoes").get();
+  const nomes = new Map();
+  snapshot.docs.forEach((doc) => {
+    const dados = doc.data();
+    const email = normalizeEmail(dados.email);
+    if (email && dados.status === "aprovada") nomes.set(email, dados.nome || email);
+  });
+  ADMIN_EMAILS.forEach((email) => { if (!nomes.has(email)) nomes.set(email, email); });
+  const membros = await Promise.all([...nomes.entries()].map(async ([email, nome]) => {
+    try {
+      const user = await getAuth().getUserByEmail(email);
+      return user.disabled ? null : { uid: user.uid, nome: user.displayName || nome, email };
+    } catch (erro) {
+      if (erro.code === "auth/user-not-found") {
+        console.warn("Conta aprovada não encontrada ao listar contatos internos.", { email });
+        return null;
+      }
+      throw erro;
+    }
+  }));
+  return { membros: membros.filter(Boolean) };
+});
+
+exports.criarChatInterno = onCall({ region: REGION }, async (request) => {
+  await assertChatMember(request);
+  const dados = request.data || {};
+  const participantes = dados.membros;
+  const nome = typeof dados.nome === "string" ? dados.nome.trim() : "";
+  if (!Array.isArray(participantes) || !participantes.length || participantes.length > 29 ||
+      participantes.some((uid) => typeof uid !== "string" || !uid || uid.includes("/") || uid === request.auth.uid) ||
+      new Set(participantes).size !== participantes.length ||
+      (participantes.length > 1 && (!nome || nome.length > 100))) {
+    throw new HttpsError("invalid-argument", "Selecione participantes válidos e informe o nome do grupo.");
+  }
+  const membros = [request.auth.uid, ...participantes].sort();
+  const contas = await Promise.all(membros.map((uid) => getAuth().getUser(uid)));
+  const solicitacoes = await db.collection("solicitacoes").get();
+  for (const conta of contas) {
+    const email = normalizeEmail(conta.email);
+    const aprovado = ADMIN_EMAILS.includes(email) || solicitacoes.docs.some((doc) =>
+      normalizeEmail(doc.data().email) === email && doc.data().status === "aprovada");
+    if (conta.disabled || !aprovado) throw new HttpsError("failed-precondition", "Um participante não possui acesso ativo.");
+  }
+  const grupo = membros.length > 2;
+  const id = grupo ? crypto.randomUUID() : crypto.createHash("sha256").update(JSON.stringify(membros)).digest("hex");
+  const ref = db.collection("chatsInternos").doc(id);
+  await db.runTransaction(async (transaction) => {
+    const existente = await transaction.get(ref);
+    if (existente.exists) {
+      if (grupo || JSON.stringify(existente.data().membros) !== JSON.stringify(membros)) {
+        throw new HttpsError("already-exists", "Não foi possível criar o chat.");
+      }
+      return;
+    }
+    const nomes = {};
+    contas.forEach((conta) => {
+      const cadastro = solicitacoes.docs.find((doc) =>
+        normalizeEmail(doc.data().email) === normalizeEmail(conta.email) && doc.data().status === "aprovada");
+      nomes[conta.uid] = conta.displayName || (cadastro && cadastro.data().nome) || conta.email || conta.uid;
+    });
+    transaction.set(ref, {
+      membros, nomes, grupo, nome: grupo ? nome : "",
+      criadoEm: FieldValue.serverTimestamp(),
+      ultimaAtividade: FieldValue.serverTimestamp()
+    });
+  });
+  return { chatId: id };
+});
+
+exports.listarChatsInternos = onCall({ region: REGION }, async (request) => {
+  await assertChatMember(request);
+  const snapshot = await db.collection("chatsInternos").where("membros", "array-contains", request.auth.uid).get();
+  return { chats: snapshot.docs.map((doc) => {
+    const dados = doc.data();
+    return {
+      id: doc.id, membros: dados.membros, nomes: dados.nomes, grupo: dados.grupo,
+      nome: dados.nome, ultimaMensagem: dados.ultimaMensagem || "",
+      ultimaAtividade: timestampMillis(dados.ultimaAtividade)
+    };
+  }) };
+});
+
+async function chatPermitido(chatId, uid) {
+  if (typeof chatId !== "string" || !chatId || chatId.includes("/")) {
+    throw new HttpsError("invalid-argument", "Informe o chat.");
+  }
+  const ref = db.collection("chatsInternos").doc(chatId);
+  const snapshot = await ref.get();
+  if (!snapshot.exists || !Array.isArray(snapshot.data().membros) || !snapshot.data().membros.includes(uid)) {
+    throw new HttpsError("permission-denied", "Você não participa deste chat.");
+  }
+  return { ref, dados: snapshot.data() };
+}
+
+exports.obterMensagensChatInterno = onCall({ region: REGION }, async (request) => {
+  await assertChatMember(request);
+  const { ref } = await chatPermitido((request.data || {}).chatId, request.auth.uid);
+  const snapshot = await ref.collection("mensagens").orderBy("criadoEm", "asc").get();
+  return { mensagens: snapshot.docs.map((doc) => {
+    const dados = doc.data();
+    return { id: doc.id, uid: dados.uid, nome: dados.nome, texto: dados.texto, criadoEm: timestampMillis(dados.criadoEm) };
+  }) };
+});
+
+exports.presencaChatInterno = onCall({ region: REGION }, async (request) => {
+  await assertChatMember(request);
+  const dados = request.data || {};
+  if (typeof dados.sessionId !== "string" || !/^[a-zA-Z0-9-]{16,80}$/.test(dados.sessionId) ||
+      typeof dados.ativa !== "boolean") {
+    throw new HttpsError("invalid-argument", "Sessão inválida.");
+  }
+  if (dados.ativa) await chatPermitido(dados.chatId, request.auth.uid);
+  await db.collection("presencasChats").doc(request.auth.uid).collection("sessoes").doc(dados.sessionId).set({
+    chatId: dados.ativa ? dados.chatId : "", atualizadoEm: FieldValue.serverTimestamp()
+  });
+  return { success: true };
+});
+
+exports.enviarMensagemChatInterno = onCall({ region: REGION }, async (request) => {
+  await assertChatMember(request);
+  const dados = request.data || {};
+  const texto = typeof dados.texto === "string" ? dados.texto.trim() : "";
+  if (!texto || texto.length > 4096 || typeof dados.messageId !== "string" ||
+      !/^[a-zA-Z0-9-]{16,80}$/.test(dados.messageId)) {
+    throw new HttpsError("invalid-argument", "Informe uma mensagem válida.");
+  }
+  const { ref, dados: chatInicial } = await chatPermitido(dados.chatId, request.auth.uid);
+  const outros = chatInicial.membros.filter((uid) => uid !== request.auth.uid);
+  const [contas, cadastros] = await Promise.all([
+    Promise.all(outros.map(async (uid) => {
+      try { return await getAuth().getUser(uid); }
+      catch (erro) {
+        if (erro.code === "auth/user-not-found") {
+          console.warn("Participante de chat sem conta ativa.", { uid });
+          return null;
+        }
+        throw erro;
+      }
+    })),
+    db.collection("solicitacoes").get()
+  ]);
+  const autorizados = new Set(contas.filter((conta) => {
+    if (!conta || conta.disabled) return false;
+    const email = normalizeEmail(conta.email);
+    return ADMIN_EMAILS.includes(email) || cadastros.docs.some((doc) =>
+      normalizeEmail(doc.data().email) === email && doc.data().status === "aprovada");
+  }).map((conta) => conta.uid));
+  await db.runTransaction(async (transaction) => {
+    const chat = await transaction.get(ref);
+    if (!chat.exists || !chat.data().membros.includes(request.auth.uid)) {
+      throw new HttpsError("permission-denied", "Você não participa deste chat.");
+    }
+    const mensagem = ref.collection("mensagens").doc(dados.messageId);
+    const anterior = await transaction.get(mensagem);
+    if (anterior.exists) {
+      if (anterior.data().uid !== request.auth.uid || anterior.data().texto !== texto) {
+        throw new HttpsError("already-exists", "Identificador de mensagem já utilizado.");
+      }
+      return;
+    }
+    const destinatarios = chat.data().membros.filter((uid) => uid !== request.auth.uid && autorizados.has(uid));
+    const presencas = await Promise.all(destinatarios.map((uid) =>
+      transaction.get(db.collection("presencasChats").doc(uid).collection("sessoes"))));
+    const nome = chat.data().nomes[request.auth.uid] || request.auth.token.name || request.auth.token.email || request.auth.uid;
+    transaction.set(mensagem, { uid: request.auth.uid, nome, texto, criadoEm: FieldValue.serverTimestamp() });
+    transaction.update(ref, { ultimaMensagem: texto.slice(0, 300), ultimaAtividade: FieldValue.serverTimestamp() });
+    destinatarios.forEach((uid, index) => {
+      const ativo = presencas[index].docs.some((sessao) =>
+        sessao.data().chatId === dados.chatId &&
+        Date.now() - timestampMillis(sessao.data().atualizadoEm) < 75 * 1000);
+      if (ativo) return;
+      const notificacaoId = crypto.createHash("sha256").update(dados.chatId + ":" + dados.messageId).digest("hex");
+      const notification = db.collection("notificacoes").doc(uid).collection("itens").doc(notificacaoId);
+      transaction.set(notification, {
+        tipo: "interna", chatId: dados.chatId,
+        nome: chat.data().grupo ? chat.data().nome : nome,
+        texto, criadoEm: FieldValue.serverTimestamp(), lida: false
+      });
+    });
+  });
+  return { success: true };
 });
 
 async function handleInboundMessage(numberId, message, contact, numberData) {
@@ -1217,7 +1717,8 @@ async function handleInboundMessage(numberId, message, contact, numberData) {
       const sourceColumnId = isNewCard
         ? firstColumnSnapshot.id
         : cardSnapshot.data().colunaId;
-      const shouldMove = !!destinationColumn &&
+      const humanAttendance = cardSnapshot && !!cardSnapshot.data().atendimentoWhatsapp;
+      const shouldMove = !humanAttendance && !!destinationColumn &&
         !!sourceColumnId &&
         sourceColumnId !== routeColumnRef.id;
       const sourceColumnRef = shouldMove && !isNewCard
@@ -1233,7 +1734,7 @@ async function handleInboundMessage(numberId, message, contact, numberData) {
         cardData.whatsappLastOutboundAt || legacyOutboundAt
       );
       const previousAutomaticReplyAt = cardData && cardData.botRespostaEnviadaEm;
-      const shouldReply = !event.replyAttempted && (
+      const shouldReply = !humanAttendance && !event.replyAttempted && (
         hasActiveBotMessage
           ? !!automaticText && shouldSendAutomaticReply({
             onlyRecipientInitiated: numberData.onlyRecipientInitiated !== false,
@@ -1247,10 +1748,11 @@ async function handleInboundMessage(numberId, message, contact, numberData) {
             receivedAtMs - timestampMillis(previousAutomaticReplyAt) >= DAY_MS)
       );
       const lastInboundMs = timestampMillis(previousInboundAt);
-      const activity = {
-        ultimaMensagemWhatsapp: messageText.slice(0, 300),
-        whatsappPhoneNumberId: numberId
-      };
+      const activity = { whatsappPhoneNumberId: numberId };
+      if (!cardData || receivedAtMs >= dataUltimaMensagem(cardData)) {
+        activity.ultimaMensagemWhatsapp = messageText.slice(0, 300);
+        activity.ultimaMensagemWhatsappEm = receivedAt;
+      }
       if (receivedAtMs >= lastInboundMs) activity.lastInboundAt = receivedAt;
       if (cardData && !cardData.whatsappLastOutboundAt && timestampMillis(legacyOutboundAt)) {
         activity.whatsappLastOutboundAt = legacyOutboundAt;
@@ -1407,12 +1909,17 @@ async function handleInboundMessage(numberId, message, contact, numberData) {
             origem: latestEvent.replyMode === "automation" ? "automacao" : "pre-atendimento",
             criadoEm: sentAt
           });
-          transaction.update(result.cardRef, {
+          const cardUpdate = {
             botRespostaApiId: apiMessageId,
             botRespostaErro: FieldValue.delete(),
             whatsappLastOutboundAt: sentAt,
             ultimaAtividade: sentAt
-          });
+          };
+          if (timestampMillis(sentAt) >= dataUltimaMensagem(cardSnapshot.data())) {
+            cardUpdate.ultimaMensagemWhatsapp = result.replyText.slice(0, 300);
+            cardUpdate.ultimaMensagemWhatsappEm = sentAt;
+          }
+          transaction.update(result.cardRef, cardUpdate);
           transaction.update(eventRef, {
             replyApiMessageId: apiMessageId,
             replySentAt: sentAt

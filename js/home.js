@@ -35,10 +35,6 @@ const conteudoProtegido = document.getElementById("conteudo-protegido");
 const nomeUsuario = document.getElementById("nome-usuario");
 const emailUsuario = document.getElementById("email-usuario");
 const avatar = document.getElementById("avatar");
-const botaoNotificacoes = document.getElementById("botao-notificacoes");
-const seloNotificacao = document.getElementById("selo-notificacao");
-const caixaNotificacoes = document.getElementById("caixa-notificacoes");
-const listaNotificacoes = document.getElementById("lista-notificacoes");
 const botaoPerfil = document.getElementById("botao-perfil");
 const menuPerfil = document.getElementById("menu-perfil");
 const botaoSair = document.getElementById("botao-sair");
@@ -97,33 +93,9 @@ onAuthStateChanged(auth, async (usuario) => {
   const dadosUsuario = await obterDadosUsuario(usuario, db);
   atualizarCabecalhoUsuario(dadosUsuario);
 
-  carregarNotificacoes();
   carregarDadosDoUsuario();
 });
 
-
-// ------------------------------------------------------------
-// 3) NOTIFICAÇÕES
-// Por enquanto, as notificações são fixas (demonstração).
-// No futuro, virão do banco: novas solicitações, aprovações,
-// bloqueios etc. O selo vermelho aparece porque há itens.
-// ------------------------------------------------------------
-function carregarNotificacoes() {
-  const notificacoes = [
-    "Bem-vindo ao Projeto Golden! 🎉",
-    "Novas funcionalidades chegam em breve."
-  ];
-
-  listaNotificacoes.innerHTML = "";
-  notificacoes.forEach((texto) => {
-    const item = document.createElement("li");
-    item.textContent = texto;
-    listaNotificacoes.appendChild(item);
-  });
-
-  // Há notificações não lidas → mostra o selo vermelho.
-  seloNotificacao.classList.add("visivel");
-}
 
 // ------------------------------------------------------------
 // 4) DADOS DO USUÁRIO + CENTRO DE CONTROLE
