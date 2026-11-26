@@ -158,47 +158,6 @@
             <p class="texto-ajuda">A configuração de e-mail será disponibilizada em outra etapa.</p>
           </section>
           </div>
-
-          <section class="conexoes-painel">
-            <div class="conexoes-titulo-secao">
-              <div>
-                <h2>Pré-atendimento automático</h2>
-                <p>Envie uma resposta inicial configurável quando uma nova conversa chegar a um número com captação ativa.</p>
-              </div>
-            </div>
-            <form id="form-bot" class="conexoes-bot-form">
-              <label>Número vinculado
-                <select id="bot-numero" required><option value="">Selecione um número</option></select>
-              </label>
-              <label class="conexoes-checkbox"><input type="checkbox" id="bot-ativo"><span>Ativar resposta automática neste número</span></label>
-              <label>Mensagem inicial<textarea id="bot-mensagem" rows="4" maxlength="1000" placeholder="Olá! Recebemos sua mensagem. Como podemos ajudar?"></textarea></label>
-              <div class="conexoes-form-acoes">
-                <p>O bot responde uma vez por conversa. A Meta só permite mensagens livres durante a janela de atendimento de 24 horas iniciada pelo cliente.</p>
-                <button type="submit" class="conexoes-botao-primario">Salvar mensagem do bot</button>
-              </div>
-            </form>
-          </section>
-
-          <section class="conexoes-painel conexoes-iniciar">
-            <div class="conexoes-titulo-secao">
-              <div>
-                <h2>Iniciar conversa</h2>
-                <p>Novos contatos iniciados pela equipe precisam usar um modelo aprovado pela Meta.</p>
-              </div>
-            </div>
-            <form id="form-nova-conversa" class="conexoes-form">
-              <label>Número de origem<select name="phoneNumberId" class="seletor-numeros" required><option value="">Selecione um número</option></select></label>
-              <label>Telefone do cliente<input name="telefone" required inputmode="tel" placeholder="5511999999999"></label>
-              <label>Nome do cliente<input name="nome" placeholder="Nome (opcional)"></label>
-              <label>Modelo aprovado<input name="templateName" required placeholder="nome_do_modelo"></label>
-              <label>Idioma do modelo<input name="templateLanguage" value="pt_BR" required></label>
-              <label>Parâmetros do corpo do modelo<textarea name="templateVariables" rows="2" placeholder="Um parâmetro por linha, na ordem aprovada"></textarea></label>
-              <div class="conexoes-form-acoes">
-                <p>Este envio cria um card na primeira coluna do kanban após a aceitação da mensagem pela Meta. Apenas modelos aprovados podem iniciar uma conversa.</p>
-                <button type="submit" class="conexoes-botao-primario">Enviar modelo e criar card</button>
-              </div>
-            </form>
-          </section>
         </main>
 
       </div>

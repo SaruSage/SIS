@@ -33,12 +33,32 @@ let numeros = [];
 let proximoRascunho = 0;
 let colunasRoteamento = [];
 let editorAberto = null;
+let avisoTimer = null;
 const estados = new Map();
 const cartoes = new Map();
 
 function mostrarAviso(texto, tipo) {
+  if (!aviso) return;
   aviso.textContent = texto;
   aviso.className = "conexoes-aviso visivel " + tipo;
+  if (avisoTimer) clearTimeout(avisoTimer);
+  avisoTimer = setTimeout(() => {
+    aviso.classList.remove("visivel");
+  }, 6000);
+}
+
+if (aviso) {
+  aviso.addEventListener("click", () => {
+    aviso.classList.remove("visivel");
+    if (avisoTimer) clearTimeout(avisoTimer);
+  });
+}
+
+function sincronizarNumero(numeroAtualizado) {
+  if (!numeroAtualizado || !numeroAtualizado.phoneNumberId) return;
+  const indice = numeros.findIndex((item) => item.phoneNumberId === numeroAtualizado.phoneNumberId);
+  if (indice >= 0) numeros[indice] = numeroAtualizado;
+  else numeros.push(numeroAtualizado);
 }
 
 function executarCallable(nome, dados) {
@@ -59,10 +79,34 @@ function criarBotao(texto, classe, acao) {
   return botao;
 }
 
+const INATIVIDADE_PADRAO_MINUTOS = 24 * 60;
+const INATIVIDADE_MAX_MINUTOS = 99 * 24 * 60 + 23 * 60 + 59;
+
+function normalizarInatividadeMinutos(valor) {
+  return Number.isInteger(valor) && valor >= 0 && valor <= INATIVIDADE_MAX_MINUTOS
+    ? valor
+    : INATIVIDADE_PADRAO_MINUTOS;
+}
+
+function decomporInatividade(minutosTotais) {
+  const seguro = normalizarInatividadeMinutos(minutosTotais);
+  return {
+    dias: Math.floor(seguro / 1440),
+    horas: Math.floor((seguro % 1440) / 60),
+    minutos: seguro % 60
+  };
+}
+
+function formatarInatividade(minutosTotais) {
+  const { dias, horas, minutos } = decomporInatividade(minutosTotais);
+  return String(dias).padStart(2, "0") + " " + String(horas).padStart(2, "0") + " " + String(minutos).padStart(2, "0");
+}
+
 function criarEstado(numero, novo = false) {
   const mensagens = Array.isArray(numero.botMessages)
     ? numero.botMessages.map(clonarMensagem)
     : [];
+  const inactivityMinutes = normalizarInatividadeMinutos(numero.inactivityMinutes);
   return {
     numero, novo, aberto: novo, contatoAberto: false, automacaoAberta: false,
     confirmando: false, salvando: false, status: novo ? "novo" : "verificando",
@@ -76,10 +120,12 @@ function criarEstado(numero, novo = false) {
     mensagemAbertaId: "",
     activeBotMessageId: numero.activeBotMessageId || "",
     onlyRecipientInitiated: numero.onlyRecipientInitiated !== false,
+    inactivityMinutes,
     automacaoOriginal: JSON.stringify({
       messages: numero.botMessages || [],
       activeId: numero.activeBotMessageId || "",
-      onlyRecipient: numero.onlyRecipientInitiated !== false
+      onlyRecipient: numero.onlyRecipientInitiated !== false,
+      inactivityMinutes
     })
   };
 }
@@ -92,7 +138,8 @@ function automacaoSerializada(estado) {
   return JSON.stringify({
     messages: estado.mensagens,
     activeId: estado.activeBotMessageId,
-    onlyRecipient: estado.onlyRecipientInitiated
+    onlyRecipient: estado.onlyRecipientInitiated,
+    inactivityMinutes: normalizarInatividadeMinutos(estado.inactivityMinutes)
   });
 }
 
@@ -115,9 +162,16 @@ function atualizarContagem() {
 
 function atualizarRodape(estado, cartao) {
   const sujo = alterado(estado);
-  cartao.querySelector(".numero-salvar").hidden = !sujo;
-  cartao.querySelector(".numero-deletar").hidden = sujo || estado.confirmando;
-  cartao.querySelector(".numero-confirmacao").hidden = sujo || !estado.confirmando;
+  const botaoSalvar = cartao.querySelector(".numero-salvar");
+  const botaoDeletar = cartao.querySelector(".numero-deletar");
+  const confirmacao = cartao.querySelector(".numero-confirmacao");
+  if (botaoSalvar) {
+    botaoSalvar.hidden = estado.confirmando;
+    botaoSalvar.disabled = !ehAdmin || estado.salvando || !sujo;
+    botaoSalvar.classList.toggle("pendente", sujo && ehAdmin && !estado.salvando);
+  }
+  if (botaoDeletar) botaoDeletar.hidden = estado.confirmando;
+  if (confirmacao) confirmacao.hidden = !estado.confirmando;
 }
 
 function atualizarStatus(estado) {
@@ -130,7 +184,7 @@ function atualizarStatus(estado) {
   const desconhecido = estado.status === "verificando" || estado.status === "desconhecido" || estado.status === "novo";
   linha.className = "numero-status " + (falha ? "falha" : desconhecido ? "desconhecido" : estado.numero.active ? "operando" : "suspenso");
   linha.textContent = "STATUS: " + (falha ? "NÃO OPERANTE" : desconhecido
-    ? (estado.status === "verificando" ? "VERIFICANDO" : "NÃO VERIFICADO") : "OPERANDO");
+    ? (estado.status === "verificando" ? "VERIFICANDO" : "NÃO VERIFICADO") : estado.numero.active ? "OPERANDO" : "SUSPENSO");
   detalhe.textContent = falha
     ? "Este número não está mais conectado ao sistema por algum problema de comunicação entre a plataforma e o whatsapp"
     : !desconhecido && !estado.numero.active
@@ -278,29 +332,37 @@ function renderizarMensagens(estado) {
       editarNomeMensagem(estado, mensagem, nome);
     });
     topo.appendChild(nome);
-    const ativa = criarElemento("label", "mensagem-ativa");
+    const ativa = criarElemento("label", "mensagem-ativa con-switch" + (estado.activeBotMessageId === mensagem.id ? " ativo" : ""));
     const check = document.createElement("input");
     check.type = "checkbox";
+    check.className = "con-switch-input con-switch-compacto";
+    check.setAttribute("role", "switch");
     check.checked = estado.activeBotMessageId === mensagem.id;
     check.disabled = !ehAdmin;
     check.setAttribute("aria-label", "Ativar " + mensagem.name);
+    ativa.addEventListener("click", (evento) => evento.stopPropagation());
     check.addEventListener("change", async (evento) => {
       evento.stopPropagation();
       const anterior = estado.activeBotMessageId;
-      estado.activeBotMessageId = check.checked ? mensagem.id : "";
+      const ativando = check.checked;
+      estado.activeBotMessageId = ativando ? mensagem.id : "";
       check.disabled = true;
       try {
         await salvarAutomacao(estado);
+        mostrarAviso(
+          "Salvo: mensagem \"" + mensagem.name + "\" " + (ativando ? "ativada" : "desativada") + " na automação.",
+          "sucesso"
+        );
       } catch (_) {
         estado.activeBotMessageId = anterior;
         renderizarNumeros();
       }
     });
-    ativa.append(check, criarElemento("span", "", check.checked ? "ATIVA" : "ATIVAR"));
+    ativa.append(check, criarElemento("span", "con-switch-texto", check.checked ? "ATIVA" : "ATIVAR"));
     topo.appendChild(ativa);
     card.appendChild(topo);
     card.addEventListener("dblclick", (evento) => {
-      if (evento.target.closest("input, button, h4")) return;
+      if (evento.target.closest("input, button, label, h4")) return;
       estado.mensagemAbertaId = aberta ? "" : mensagem.id;
       renderizarNumeros();
     });
@@ -335,10 +397,14 @@ function editarNomeMensagem(estado, mensagem, titulo) {
   const terminar = async () => {
     if (pronto) return;
     pronto = true;
+    const nomeAnterior = mensagem.name;
     mensagem.name = input.value.trim() || mensagem.name;
     titulo.textContent = mensagem.name;
     input.replaceWith(titulo);
-    await salvarAutomacao(estado);
+    if (mensagem.name !== nomeAnterior) {
+      await salvarAutomacao(estado);
+      mostrarAviso("Salvo: nome da mensagem atualizado para \"" + mensagem.name + "\".", "sucesso");
+    }
   };
   input.addEventListener("blur", terminar);
   input.addEventListener("keydown", (evento) => {
@@ -397,13 +463,16 @@ async function salvarAutomacao(estado) {
       phoneNumberId: estado.numero.phoneNumberId,
       botMessages: estado.mensagens,
       activeBotMessageId: estado.activeBotMessageId,
-      onlyRecipientInitiated: estado.onlyRecipientInitiated
+      onlyRecipientInitiated: estado.onlyRecipientInitiated,
+      inactivityMinutes: normalizarInatividadeMinutos(estado.inactivityMinutes)
     });
     if (!resultado.number) throw new Error("O backend não retornou a automação salva.");
     estado.numero = resultado.number;
+    sincronizarNumero(resultado.number);
     estado.mensagens = (resultado.number.botMessages || []).map(clonarMensagem);
     estado.activeBotMessageId = resultado.number.activeBotMessageId || "";
     estado.onlyRecipientInitiated = resultado.number.onlyRecipientInitiated !== false;
+    estado.inactivityMinutes = normalizarInatividadeMinutos(resultado.number.inactivityMinutes);
     estado.automacaoOriginal = automacaoSerializada(estado);
     renderizarNumeros();
   } catch (erro) {
@@ -468,16 +537,18 @@ function renderizarBlocosEditor(sessao, blocos, atualizarPreview) {
       if (block.type === "option") {
         const formatacao = criarElemento("div", "editor-formatacao");
         for (const [chave, texto] of [["bold", "Negritar a opção"], ["styled", "Estilizar opção"]]) {
-          const label = criarElemento("label", "editor-toggle");
+          const label = criarElemento("label", "editor-toggle con-switch");
           const input = document.createElement("input");
           input.type = "checkbox";
+          input.className = "con-switch-input con-switch-compacto";
+          input.setAttribute("role", "switch");
           input.checked = !!block[chave];
           input.addEventListener("change", () => {
             block[chave] = input.checked;
             if (chave === "styled") blocoAlternativo.hidden = !input.checked;
             atualizarPreview();
           });
-          label.append(input, criarElemento("span", "", texto));
+          label.append(input, criarElemento("span", "con-switch-texto", texto));
           formatacao.appendChild(label);
         }
         const blocoAlternativo = campoEditor("Texto estilizado", block.style, (valor) => {
@@ -543,12 +614,24 @@ function abrirEditorMensagem(estado, mensagem, nova) {
     "Monte a resposta em até 20 áreas. As opções simples aparecem na mensagem; as opções ocultas ficam apenas como gatilhos internos.");
   const previewWrap = criarElemento("section", "editor-preview-wrap");
   const preview = criarElemento("div", "editor-preview");
-  const atualizarPreview = () => { preview.textContent = renderizarTextoMensagem(draft) || "A pré-visualização aparecerá aqui."; verificarSujo(); };
+  const erroEditor = criarElemento("p", "editor-erro");
+  erroEditor.setAttribute("role", "alert");
+  erroEditor.hidden = true;
+  const mostrarErroEditor = (texto) => {
+    erroEditor.textContent = texto || "";
+    erroEditor.hidden = !texto;
+    if (texto) mostrarAviso(texto, "erro");
+  };
+  const atualizarPreview = () => {
+    preview.textContent = renderizarTextoMensagem(draft) || "A pré-visualização aparecerá aqui.";
+    erroEditor.hidden = true;
+    verificarSujo();
+  };
   previewWrap.append(criarElemento("h2", "", "Pré-visualização"), preview);
   const ferramentas = criarElemento("div", "editor-ferramentas");
   const blocos = criarElemento("div", "editor-blocos");
   const adicionarBloco = (tipo) => {
-    if (draft.blocks.length >= 20) { mostrarAviso("Limite de 20 blocos atingido.", "erro"); return; }
+    if (draft.blocks.length >= 20) { mostrarErroEditor("Limite de 20 blocos atingido."); return; }
     const base = tipo === "text" ? { type: tipo, text: "" } : {
       type: tipo, trigger: "", description: "", columnId: "", columnName: ""
     };
@@ -566,8 +649,11 @@ function abrirEditorMensagem(estado, mensagem, nova) {
   corpo.append(instrucoes, previewWrap, ferramentas, blocos);
   const rodape = criarElemento("footer", "editor-rodape");
   const salvar = criarBotao("Salvar", "editor-salvar", async () => {
+    draft.name = nome.value.trim() || draft.name;
+    nome.value = draft.name;
     const erro = validarMensagem(draft);
-    if (erro) { mostrarAviso(erro, "erro"); return; }
+    if (erro) { mostrarErroEditor(erro); return; }
+    erroEditor.hidden = true;
     salvar.disabled = true;
     const anteriores = estado.mensagens.map(clonarMensagem);
     try {
@@ -575,11 +661,18 @@ function abrirEditorMensagem(estado, mensagem, nova) {
       const indice = estado.mensagens.findIndex((item) => item.id === normalizada.id);
       if (indice >= 0) estado.mensagens[indice] = normalizada;
       else estado.mensagens.push(normalizada);
+      estado.aberto = true;
+      estado.automacaoAberta = true;
       estado.mensagemAbertaId = normalizada.id;
       await salvarAutomacao(estado);
       fecharSemConfirmar();
-    } catch (_) {
+      mostrarAviso(
+        "Salvo: mensagem \"" + normalizada.name + "\" " + (nova ? "criada" : "atualizada") + " na automação.",
+        "sucesso"
+      );
+    } catch (erroSalvamento) {
       estado.mensagens = anteriores;
+      mostrarErroEditor((erroSalvamento && erroSalvamento.message) || "Não foi possível salvar a mensagem.");
     } finally {
       salvar.disabled = false;
     }
@@ -604,6 +697,7 @@ function abrirEditorMensagem(estado, mensagem, nova) {
       try {
         await salvarAutomacao(estado);
         fecharSemConfirmar();
+        mostrarAviso("Salvo: mensagem \"" + draft.name + "\" removida da automação.", "sucesso");
       } catch (_) {
         estado.mensagens = anteriores;
         estado.activeBotMessageId = ativaAnterior;
@@ -617,7 +711,7 @@ function abrirEditorMensagem(estado, mensagem, nova) {
     confirmacao.hidden = false;
     deletar.hidden = true;
   }
-  rodape.append(salvar, deletar, confirmacao);
+  rodape.append(erroEditor, salvar, deletar, confirmacao);
   modal.append(titulo, corpo, rodape);
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
@@ -669,7 +763,7 @@ function abrirEditorMensagem(estado, mensagem, nova) {
 
 function renderizarCartao(estado) {
   const numero = estado.numero;
-  const cartao = criarElemento("article", "conexoes-numero" + (!numero.active && !estado.novo ? " desativado" : ""));
+  const cartao = criarElemento("article", "conexoes-numero" + (estado.aberto ? " aberto" : "") + (!numero.active && !estado.novo ? " desativado" : ""));
   cartoes.set(estado, cartao);
   const topo = criarElemento("div", "numero-topo");
   const identidade = criarElemento("div", "numero-identidade");
@@ -683,30 +777,60 @@ function renderizarCartao(estado) {
   identidade.append(titulo, criarElemento("p", "numero-telefone", numero.displayPhoneNumber || (estado.novo ? "Número ainda não vinculado" : numero.phoneNumberId)));
   const controles = criarElemento("div", "numero-controles");
   if (!estado.novo) {
-    const label = criarElemento("label", "numero-ativacao");
+    const label = criarElemento("label", "numero-ativacao con-switch" + (numero.active ? " ativo" : ""));
+    label.addEventListener("click", (evento) => evento.stopPropagation());
     const toggle = document.createElement("input");
     toggle.type = "checkbox";
+    toggle.className = "con-switch-input";
+    toggle.setAttribute("role", "switch");
     toggle.checked = numero.active;
     toggle.disabled = !ehAdmin || estado.salvando;
     toggle.setAttribute("aria-label", "Ativar ou desativar " + estado.nome);
-    toggle.addEventListener("change", async () => {
+    const textoToggle = criarElemento("span", "con-switch-texto", numero.active ? "ATIVADO" : "DESATIVADO");
+    toggle.addEventListener("change", async (evento) => {
+      evento.stopPropagation();
+      if (!ehAdmin || estado.salvando) {
+        toggle.checked = estado.numero.active;
+        return;
+      }
+      const ativoAnterior = estado.numero.active;
+      const novoAtivo = toggle.checked;
+      estado.salvando = true;
+      estado.numero.active = novoAtivo;
+      sincronizarNumero(estado.numero);
       toggle.disabled = true;
+      label.classList.toggle("ativo", novoAtivo);
+      textoToggle.textContent = novoAtivo ? "ATIVADO" : "DESATIVADO";
+      cartao.classList.toggle("desativado", !novoAtivo);
+      atualizarStatus(estado);
       try {
-        await executarCallable("updateWhatsAppNumber", {
-          phoneNumberId: numero.phoneNumberId, action: "active", active: toggle.checked
+        const resultado = await executarCallable("updateWhatsAppNumber", {
+          phoneNumberId: estado.numero.phoneNumberId, action: "active", active: novoAtivo
         });
-        numero.active = toggle.checked;
-        preencherSeletores();
-        renderizarNumeros();
-        mostrarAviso(numero.active ? "Número ativado." : "Número desativado.", "sucesso");
+        if (resultado && resultado.number) {
+          estado.numero = resultado.number;
+          sincronizarNumero(resultado.number);
+        } else {
+          estado.numero.active = novoAtivo;
+          sincronizarNumero(estado.numero);
+        }
+        mostrarAviso(
+          estado.numero.active
+            ? "Salvo: número \"" + estado.nome + "\" ativado para uso na plataforma."
+            : "Salvo: número \"" + estado.nome + "\" desativado (uso suspenso na plataforma).",
+          "sucesso"
+        );
       } catch (erro) {
-        toggle.checked = numero.active;
+        estado.numero.active = ativoAnterior;
+        sincronizarNumero(estado.numero);
         mostrarAviso(erro.message || "Não foi possível alterar a ativação.", "erro");
       } finally {
-        toggle.disabled = !ehAdmin;
+        estado.salvando = false;
+        preencherSeletores();
+        renderizarNumeros();
       }
     });
-    label.append(toggle, criarElemento("span", "", numero.active ? "ATIVADO" : "DESATIVADO"));
+    label.append(toggle, textoToggle);
     controles.appendChild(label);
   }
   const expandir = criarBotao("⋮", "numero-expandir", () => {
@@ -733,6 +857,7 @@ function renderizarCartao(estado) {
   const corpo = criarElemento("div", "numero-corpo");
   corpo.hidden = !estado.aberto;
   const form = criarElemento("form", "numero-form");
+  form.noValidate = true;
   form.addEventListener("submit", (evento) => salvarNumero(evento, estado));
   const contato = criarSecao("CADASTRO DE CONTATO", estado.contatoAberto, (aberto) => { estado.contatoAberto = aberto; });
   const campos = criarElemento("div", "numero-campos");
@@ -781,16 +906,77 @@ function renderizarCartao(estado) {
   contato.appendChild(campos);
   const automacao = criarSecao("AUTOMAÇÃO DE CONTATO", estado.automacaoAberta, (aberto) => { estado.automacaoAberta = aberto; });
   const painelAutomacao = criarElemento("div", "numero-automacao");
-  const opcao = criarElemento("label", "numero-opcao");
+  const opcao = criarElemento("label", "numero-opcao con-switch");
   const check = document.createElement("input");
   check.type = "checkbox";
+  check.className = "con-switch-input con-switch-compacto";
+  check.setAttribute("role", "switch");
   check.checked = estado.onlyRecipientInitiated;
   check.disabled = estado.novo || !ehAdmin;
   check.addEventListener("change", () => {
     estado.onlyRecipientInitiated = check.checked;
     atualizarRodape(estado, cartao);
   });
-  opcao.append(check, criarElemento("span", "", "ENVIAR SOMENTE QUANDO O CONTATO FOR INICIADO PELO DESTINATÁRIO"));
+  opcao.append(check, criarElemento("span", "con-switch-texto", "ENVIAR SOMENTE QUANDO O CONTATO FOR INICIADO PELO DESTINATÁRIO"));
+
+  const inatividadeWrap = criarElemento("div", "numero-inatividade");
+  const tituloInatividade = criarElemento("span", "inatividade-titulo", "TEMPO DE INATIVIDADE");
+
+  const partes = decomporInatividade(estado.inactivityMinutes);
+  const criarCampoTempo = (subrotulo, valorInicial, maxValor, ariaLabel) => {
+    const campoLabel = criarElemento("label", "inatividade-campo");
+    const input = document.createElement("input");
+    input.type = "number";
+    input.className = "inatividade-input";
+    input.min = "0";
+    input.max = String(maxValor);
+    input.step = "1";
+    input.inputMode = "numeric";
+    input.value = String(valorInicial).padStart(2, "0");
+    input.disabled = estado.novo || !ehAdmin;
+    input.setAttribute("aria-label", ariaLabel);
+    const span = criarElemento("span", "inatividade-subrotulo", subrotulo);
+    campoLabel.append(input, span);
+    return { campoLabel, input };
+  };
+  const campoDias = criarCampoTempo("dias", partes.dias, 99, "Dias de inatividade");
+  const campoHoras = criarCampoTempo("horas", partes.horas, 23, "Horas de inatividade");
+  const campoMinutos = criarCampoTempo("minutos", partes.minutos, 59, "Minutos de inatividade");
+  const limitarInteiro = (input, maxValor) => {
+    const bruto = parseInt(String(input.value || "0").replace(/\D/g, ""), 10);
+    return Number.isNaN(bruto) ? 0 : Math.max(0, Math.min(maxValor, bruto));
+  };
+  const textoResumoInatividade = (d, h, m) =>
+    "A mensagem será disparada depois de " +
+    String(d).padStart(2, "0") + " dias, " +
+    String(h).padStart(2, "0") + " horas e " +
+    String(m).padStart(2, "0") + " minutos de inatividade no chat";
+  const resumoInatividade = criarElemento(
+    "p",
+    "inatividade-resumo",
+    textoResumoInatividade(partes.dias, partes.horas, partes.minutos)
+  );
+  const atualizarInatividade = (formatarCampos) => {
+    const d = limitarInteiro(campoDias.input, 99);
+    const h = limitarInteiro(campoHoras.input, 23);
+    const m = limitarInteiro(campoMinutos.input, 59);
+    if (formatarCampos) {
+      campoDias.input.value = String(d).padStart(2, "0");
+      campoHoras.input.value = String(h).padStart(2, "0");
+      campoMinutos.input.value = String(m).padStart(2, "0");
+    }
+    estado.inactivityMinutes = d * 1440 + h * 60 + m;
+    resumoInatividade.textContent = textoResumoInatividade(d, h, m);
+    atualizarRodape(estado, cartao);
+  };
+  for (const item of [campoDias, campoHoras, campoMinutos]) {
+    item.input.addEventListener("input", () => atualizarInatividade(false));
+    item.input.addEventListener("blur", () => atualizarInatividade(true));
+  }
+  const gradeTempo = criarElemento("div", "inatividade-campos");
+  gradeTempo.append(campoDias.campoLabel, campoHoras.campoLabel, campoMinutos.campoLabel);
+  inatividadeWrap.append(tituloInatividade, gradeTempo, resumoInatividade);
+
   const criarMensagem = criarBotao("CRIAR MENSAGEM", "conexoes-botao-secundario", () => {
     const mensagem = {
       id: crypto.randomUUID(),
@@ -800,7 +986,7 @@ function renderizarCartao(estado) {
     abrirEditorMensagem(estado, mensagem, true);
   });
   criarMensagem.disabled = estado.novo || !ehAdmin;
-  painelAutomacao.append(opcao, criarMensagem);
+  painelAutomacao.append(opcao, inatividadeWrap, criarMensagem);
   painelAutomacao.appendChild(renderizarMensagens(estado));
   automacao.appendChild(painelAutomacao);
   form.append(contato, automacao);
@@ -832,7 +1018,7 @@ function renderizarCartao(estado) {
     atualizarRodape(estado, cartao);
   });
   confirmacao.append(confirmar, manter, criarElemento("p", "numero-ajuda", "* PARA CANCELAR O DELETE, CLIQUE EM QUALQUER PONTO DA TELA."));
-  rodape.append(salvar, deletar, confirmacao);
+  rodape.append(deletar, salvar, confirmacao);
   form.appendChild(rodape);
   corpo.appendChild(form);
   cartao.appendChild(corpo);
@@ -891,11 +1077,26 @@ async function salvarNumero(evento, estado) {
   const dados = Object.fromEntries(Object.entries(estado.campos).map(([chave, valor]) => [chave, valor.trim()]));
   const alterarCredenciais = estado.novo || estado.campos.accessToken || estado.campos.verifyToken || estado.campos.appSecret ||
     dados.appId !== (estado.numero.appId || "");
+  const alterarNome = estado.nome !== estado.nomeOriginal;
   const alterarAutomacao = automacaoSerializada(estado) !== estado.automacaoOriginal;
+  let onlyRecipientAnterior = true;
+  let inactivityAnterior = 1440;
+  try {
+    const originalObj = JSON.parse(estado.automacaoOriginal || "{}");
+    onlyRecipientAnterior = originalObj.onlyRecipient !== false;
+    if (Number.isInteger(originalObj.inactivityMinutes)) inactivityAnterior = originalObj.inactivityMinutes;
+  } catch (_) {
+    onlyRecipientAnterior = estado.numero.onlyRecipientInitiated !== false;
+    if (Number.isInteger(estado.numero.inactivityMinutes)) inactivityAnterior = estado.numero.inactivityMinutes;
+  }
+  const alterarSomenteDestinatario = estado.onlyRecipientInitiated !== onlyRecipientAnterior;
+  const inactivityAtual = Number.isInteger(estado.inactivityMinutes) ? estado.inactivityMinutes : inactivityAnterior;
+  const alterarInatividade = inactivityAtual !== inactivityAnterior;
   const automacaoPendente = {
     mensagens: estado.mensagens.map(clonarMensagem),
     activeBotMessageId: estado.activeBotMessageId,
-    onlyRecipientInitiated: estado.onlyRecipientInitiated
+    onlyRecipientInitiated: estado.onlyRecipientInitiated,
+    inactivityMinutes: inactivityAtual
   };
   if (estado.novo && numeros.some((numero) => numero.phoneNumberId === dados.phoneNumberId)) {
     mostrarAviso("Este Phone Number ID já está vinculado. Edite o card existente para atualizar as credenciais.", "erro");
@@ -913,7 +1114,7 @@ async function salvarNumero(evento, estado) {
   renderizarNumeros();
   try {
     if (alterarCredenciais) {
-      if (estado.nome !== estado.nomeOriginal) dados.displayName = estado.nome;
+      if (alterarNome) dados.displayName = estado.nome;
       const resultado = await executarCallable("connectWhatsAppNumber", dados);
       if (!resultado.number || resultado.number.phoneNumberId !== dados.phoneNumberId ||
           resultado.number.wabaId !== dados.wabaId || resultado.number.appId !== dados.appId) {
@@ -934,7 +1135,7 @@ async function salvarNumero(evento, estado) {
       atualizarContagem();
       if (alterarAutomacao) await salvarAutomacao(atualizado);
       verificarNumero(atualizado);
-    } else if (estado.nome !== estado.nomeOriginal) {
+    } else if (alterarNome) {
       await executarCallable("updateWhatsAppNumber", {
         phoneNumberId: estado.numero.phoneNumberId, action: "name", displayName: estado.nome
       });
@@ -942,8 +1143,28 @@ async function salvarNumero(evento, estado) {
       estado.nomeOriginal = estado.nome;
     }
     if (alterarAutomacao && !alterarCredenciais) await salvarAutomacao(estado);
-    mostrarAviso(alterarCredenciais ? "Número vinculado ao app. Configure o webhook na Meta." :
-      alterarAutomacao ? "Automação salva." : "Nome salvo.", "sucesso");
+    const alteracoesSalvas = [];
+    if (alterarCredenciais) alteracoesSalvas.push("vínculo e credenciais do número (configure o webhook na Meta)");
+    if (alterarNome) alteracoesSalvas.push("nome do número (\"" + estado.nome + "\")");
+    if (alterarSomenteDestinatario) {
+      alteracoesSalvas.push(
+        "regra \"Enviar somente quando o contato for iniciado pelo destinatário\" (" +
+        (estado.onlyRecipientInitiated ? "ativada" : "desativada") + ")"
+      );
+    }
+    if (alterarInatividade) {
+      const d = String(Math.floor(inactivityAtual / 1440)).padStart(2, "0");
+      const h = String(Math.floor((inactivityAtual % 1440) / 60)).padStart(2, "0");
+      const m = String(inactivityAtual % 60).padStart(2, "0");
+      alteracoesSalvas.push("tempo de inatividade (" + d + " " + h + " " + m + ")");
+    }
+    if (alterarAutomacao && !alterarSomenteDestinatario && !alterarInatividade) {
+      alteracoesSalvas.push("configurações de automação");
+    }
+    mostrarAviso(
+      alteracoesSalvas.length ? "Salvo: " + alteracoesSalvas.join(", ") + "." : "Alterações salvas.",
+      "sucesso"
+    );
   } catch (erro) {
     console.error("Erro ao salvar conexão WhatsApp:", erro);
     mostrarAviso(erro.message || "Não foi possível salvar a conexão.", "erro");
@@ -956,12 +1177,18 @@ async function salvarNumero(evento, estado) {
 async function alterarCaptacao(estado) {
   const numero = estado.numero;
   try {
-    await executarCallable("updateWhatsAppNumber", {
+    const resultado = await executarCallable("updateWhatsAppNumber", {
       phoneNumberId: numero.phoneNumberId, action: "capture", captureEnabled: !numero.captureEnabled
     });
-    numero.captureEnabled = !numero.captureEnabled;
+    if (resultado && resultado.number) {
+      estado.numero = resultado.number;
+      sincronizarNumero(resultado.number);
+    } else {
+      numero.captureEnabled = !numero.captureEnabled;
+      sincronizarNumero(numero);
+    }
     renderizarNumeros();
-    mostrarAviso("Captação " + (numero.captureEnabled ? "ativada." : "desativada."), "sucesso");
+    mostrarAviso("Salvo: captação de mensagens " + (estado.numero.captureEnabled ? "ativada." : "desativada."), "sucesso");
   } catch (erro) {
     mostrarAviso(erro.message || "Não foi possível alterar a captação.", "erro");
   }
@@ -994,7 +1221,8 @@ function preencherSeletores() {
     typeof appId === "string" && /^\d{6,25}$/.test(appId)
   ))].sort();
   appsMeta.replaceChildren(...apps.map((appId) => new Option(appId, appId)));
-  [seletorBot, ...document.querySelectorAll(".seletor-numeros")].forEach((seletor) => {
+  const seletores = [seletorBot, ...document.querySelectorAll(".seletor-numeros")].filter(Boolean);
+  seletores.forEach((seletor) => {
     const atual = seletor.value;
     seletor.replaceChildren(new Option("Selecione um número", ""));
     numeros.filter((numero) => numero.active).forEach((numero) => {
@@ -1002,10 +1230,11 @@ function preencherSeletores() {
     });
     if (numeros.some((numero) => numero.phoneNumberId === atual && numero.active)) seletor.value = atual;
   });
-  atualizarConfiguracaoBot();
+  if (formBot && seletorBot && botAtivo && botMensagem) atualizarConfiguracaoBot();
 }
 
 function atualizarConfiguracaoBot() {
+  if (!formBot || !seletorBot || !botAtivo || !botMensagem) return;
   const numero = numeros.find((item) => item.phoneNumberId === seletorBot.value && item.active);
   botAtivo.checked = !!(numero && numero.preAtendimentoEnabled);
   botMensagem.value = numero ? (numero.preAtendimentoMessage || "") : "";
@@ -1071,49 +1300,53 @@ onAuthStateChanged(auth, async (usuario) => {
   }
 });
 
-seletorBot.addEventListener("change", atualizarConfiguracaoBot);
-formBot.addEventListener("submit", async (evento) => {
-  evento.preventDefault();
-  const botao = formBot.querySelector("button[type='submit']");
-  const phoneNumberId = seletorBot.value;
-  const preAtendimentoMessage = botMensagem.value.trim();
-  if (!phoneNumberId) return;
-  if (botAtivo.checked && !preAtendimentoMessage) {
-    mostrarAviso("Escreva a mensagem automática antes de ativar o bot.", "erro");
-    return;
-  }
-  botao.disabled = true;
-  try {
-    await executarCallable("saveWhatsAppSettings", {
-      phoneNumberId, preAtendimentoEnabled: botAtivo.checked, preAtendimentoMessage
-    });
-    const numero = numeros.find((item) => item.phoneNumberId === phoneNumberId);
-    if (numero) { numero.preAtendimentoEnabled = botAtivo.checked; numero.preAtendimentoMessage = preAtendimentoMessage; }
-    mostrarAviso("Configuração do pré-atendimento salva.", "sucesso");
-  } catch (erro) {
-    mostrarAviso(erro.message || "Não foi possível salvar a configuração do bot.", "erro");
-  } finally {
-    botao.disabled = false;
-  }
-});
+if (seletorBot) seletorBot.addEventListener("change", atualizarConfiguracaoBot);
+if (formBot) {
+  formBot.addEventListener("submit", async (evento) => {
+    evento.preventDefault();
+    const botao = formBot.querySelector("button[type='submit']");
+    const phoneNumberId = seletorBot.value;
+    const preAtendimentoMessage = botMensagem.value.trim();
+    if (!phoneNumberId) return;
+    if (botAtivo.checked && !preAtendimentoMessage) {
+      mostrarAviso("Escreva a mensagem automática antes de ativar o bot.", "erro");
+      return;
+    }
+    botao.disabled = true;
+    try {
+      await executarCallable("saveWhatsAppSettings", {
+        phoneNumberId, preAtendimentoEnabled: botAtivo.checked, preAtendimentoMessage
+      });
+      const numero = numeros.find((item) => item.phoneNumberId === phoneNumberId);
+      if (numero) { numero.preAtendimentoEnabled = botAtivo.checked; numero.preAtendimentoMessage = preAtendimentoMessage; }
+      mostrarAviso("Configuração do pré-atendimento salva.", "sucesso");
+    } catch (erro) {
+      mostrarAviso(erro.message || "Não foi possível salvar a configuração do bot.", "erro");
+    } finally {
+      botao.disabled = false;
+    }
+  });
+}
 
-formNovaConversa.addEventListener("submit", async (evento) => {
-  evento.preventDefault();
-  const botao = formNovaConversa.querySelector("button[type='submit']");
-  const dados = Object.fromEntries(new FormData(formNovaConversa).entries());
-  botao.disabled = true;
-  try {
-    const resultado = await executarCallable("sendWhatsAppMessage", {
-      ...dados, mode: "template", templateLanguage: dados.templateLanguage || "pt_BR"
-    });
-    formNovaConversa.reset();
-    mostrarAviso("Modelo enviado pela Meta. Card criado no kanban (" + resultado.cardId + ").", "sucesso");
-  } catch (erro) {
-    mostrarAviso(erro.message || "Não foi possível iniciar a conversa.", "erro");
-  } finally {
-    botao.disabled = false;
-  }
-});
+if (formNovaConversa) {
+  formNovaConversa.addEventListener("submit", async (evento) => {
+    evento.preventDefault();
+    const botao = formNovaConversa.querySelector("button[type='submit']");
+    const dados = Object.fromEntries(new FormData(formNovaConversa).entries());
+    botao.disabled = true;
+    try {
+      const resultado = await executarCallable("sendWhatsAppMessage", {
+        ...dados, mode: "template", templateLanguage: dados.templateLanguage || "pt_BR"
+      });
+      formNovaConversa.reset();
+      mostrarAviso("Modelo enviado pela Meta. Card criado no kanban (" + resultado.cardId + ").", "sucesso");
+    } catch (erro) {
+      mostrarAviso(erro.message || "Não foi possível iniciar a conversa.", "erro");
+    } finally {
+      botao.disabled = false;
+    }
+  });
+}
 
 if (botaoSair) {
   botaoSair.addEventListener("click", async () => {

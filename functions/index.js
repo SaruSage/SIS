@@ -8,8 +8,10 @@ const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https")
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const {
+  DEFAULT_INACTIVITY_MINUTES,
   findMatchingOption,
   normalizeAutomation,
+  normalizeInactivityMinutes,
   renderMessage,
   shouldSendAutomaticReply,
   timestampMillis,
@@ -178,7 +180,8 @@ function publicNumber(documento) {
     preAtendimentoMessage: dados.preAtendimentoMessage || "",
     botMessages: Array.isArray(dados.botMessages) ? dados.botMessages : [],
     activeBotMessageId: dados.activeBotMessageId || "",
-    onlyRecipientInitiated: dados.onlyRecipientInitiated !== false
+    onlyRecipientInitiated: dados.onlyRecipientInitiated !== false,
+    inactivityMinutes: Number.isInteger(dados.inactivityMinutes) ? dados.inactivityMinutes : DEFAULT_INACTIVITY_MINUTES
   };
 }
 
@@ -761,7 +764,7 @@ exports.connectWhatsAppNumber = onCall({ region: REGION, timeoutSeconds: 120 }, 
       const previous = current.data();
       for (const field of [
         "active", "captureEnabled", "preAtendimentoEnabled", "preAtendimentoMessage",
-        "displayName", "botMessages", "activeBotMessageId", "onlyRecipientInitiated", "criadoPor"
+        "displayName", "botMessages", "activeBotMessageId", "onlyRecipientInitiated", "inactivityMinutes", "criadoPor"
       ]) {
         if (previous[field] !== undefined) data[field] = previous[field];
       }
@@ -796,14 +799,14 @@ exports.updateWhatsAppNumber = onCall({ region: REGION }, async (request) => {
       captureEnabled: request.data.captureEnabled === true,
       atualizadoEm: FieldValue.serverTimestamp()
     });
-    return { success: true };
+    return { success: true, number: publicNumber(await ref.get()) };
   }
   if (request.data.action === "active") {
     if (typeof request.data.active !== "boolean") {
       throw new HttpsError("invalid-argument", "Informe um estado de ativação válido.");
     }
     await ref.update({ active: request.data.active, atualizadoEm: FieldValue.serverTimestamp() });
-    return { success: true };
+    return { success: true, number: publicNumber(await ref.get()) };
   }
   if (request.data.action === "name") {
     if (typeof request.data.displayName !== "string" ||
@@ -811,7 +814,7 @@ exports.updateWhatsAppNumber = onCall({ region: REGION }, async (request) => {
       throw new HttpsError("invalid-argument", "Informe um nome com até 100 caracteres.");
     }
     await ref.update({ displayName: request.data.displayName.trim(), atualizadoEm: FieldValue.serverTimestamp() });
-    return { success: true };
+    return { success: true, number: publicNumber(await ref.get()) };
   }
   if (request.data.action !== "remove") {
     throw new HttpsError("invalid-argument", "Ação de administração inválida.");
@@ -890,9 +893,13 @@ exports.saveWhatsAppAutomation = onCall({ region: REGION }, async (request) => {
   const numberRef = db.collection("whatsappNumbers").doc(phoneNumberId);
   if (!(await numberRef.get()).exists) throw new HttpsError("not-found", "Número não encontrado.");
   let messages;
+  let inactivityMinutes;
   try {
     validateAutomation(data.botMessages, data.activeBotMessageId);
     messages = normalizeAutomation(data.botMessages);
+    if (data.inactivityMinutes !== undefined) {
+      inactivityMinutes = normalizeInactivityMinutes(data.inactivityMinutes);
+    }
   } catch (erro) {
     throw new HttpsError("invalid-argument", erro.message);
   }
@@ -919,6 +926,7 @@ exports.saveWhatsAppAutomation = onCall({ region: REGION }, async (request) => {
     botMessages: messages,
     activeBotMessageId: data.activeBotMessageId,
     onlyRecipientInitiated: data.onlyRecipientInitiated,
+    ...(inactivityMinutes !== undefined ? { inactivityMinutes } : {}),
     atualizadoEm: FieldValue.serverTimestamp()
   });
   return { number: publicNumber(await numberRef.get()) };
@@ -1229,6 +1237,7 @@ async function handleInboundMessage(numberId, message, contact, numberData) {
         hasActiveBotMessage
           ? !!automaticText && shouldSendAutomaticReply({
             onlyRecipientInitiated: numberData.onlyRecipientInitiated !== false,
+            inactivityMinutes: numberData.inactivityMinutes,
             receivedAt,
             lastInboundAt: previousInboundAt,
             lastOutboundAt: previousOutboundAt,

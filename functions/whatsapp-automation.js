@@ -37,8 +37,20 @@ function timestampMillis(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+const DEFAULT_INACTIVITY_MINUTES = 24 * 60;
+const MAX_INACTIVITY_MINUTES = 99 * 24 * 60 + 23 * 60 + 59;
+
+function normalizeInactivityMinutes(value) {
+  if (value === undefined || value === null) return DEFAULT_INACTIVITY_MINUTES;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > MAX_INACTIVITY_MINUTES) {
+    throw new Error("O tempo de inatividade deve estar entre 00 00 00 e 99 23 59.");
+  }
+  return value;
+}
+
 function shouldSendAutomaticReply({
   onlyRecipientInitiated = true,
+  inactivityMinutes = DEFAULT_INACTIVITY_MINUTES,
   receivedAt,
   lastInboundAt,
   lastOutboundAt,
@@ -46,12 +58,17 @@ function shouldSendAutomaticReply({
 }) {
   const receivedAtMs = timestampMillis(receivedAt);
   if (!receivedAtMs) return false;
+  const thresholdMinutes = Number.isInteger(inactivityMinutes) &&
+    inactivityMinutes >= 0 && inactivityMinutes <= MAX_INACTIVITY_MINUTES
+      ? inactivityMinutes
+      : DEFAULT_INACTIVITY_MINUTES;
+  const thresholdMs = thresholdMinutes * 60 * 1000;
   if (onlyRecipientInitiated !== false) {
     const lastActivity = Math.max(timestampMillis(lastInboundAt), timestampMillis(lastOutboundAt));
-    return !lastActivity || receivedAtMs - lastActivity >= 24 * 60 * 60 * 1000;
+    return !lastActivity || receivedAtMs - lastActivity >= thresholdMs;
   }
   const lastAutomatic = timestampMillis(lastAutomaticReplyAt);
-  return !lastAutomatic || receivedAtMs - lastAutomatic >= 24 * 60 * 60 * 1000;
+  return !lastAutomatic || receivedAtMs - lastAutomatic >= thresholdMs;
 }
 
 function validateAutomation(messages, activeMessageId) {
@@ -126,7 +143,10 @@ function normalizeAutomation(messages) {
 }
 
 module.exports = {
+  DEFAULT_INACTIVITY_MINUTES,
+  MAX_INACTIVITY_MINUTES,
   findMatchingOption,
+  normalizeInactivityMinutes,
   normalizeReply,
   normalizeAutomation,
   renderMessage,

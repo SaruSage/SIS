@@ -1072,3 +1072,70 @@ test("falha ao salvar token preserva versões ativas e registra código e detalh
     assert.equal(logged.includes(credential), false);
   }
 });
+
+test("tempo de inatividade configurável (00 00 00 a 99 23 59) é validado, persistido e aplicado no disparo", async () => {
+  const {
+    DEFAULT_INACTIVITY_MINUTES,
+    MAX_INACTIVITY_MINUTES,
+    normalizeInactivityMinutes,
+    shouldSendAutomaticReply
+  } = whatsappAutomation;
+  assert.equal(DEFAULT_INACTIVITY_MINUTES, 1440);
+  assert.equal(MAX_INACTIVITY_MINUTES, 99 * 1440 + 23 * 60 + 59);
+  assert.equal(normalizeInactivityMinutes(undefined), 1440);
+  assert.equal(normalizeInactivityMinutes(0), 0);
+  assert.equal(normalizeInactivityMinutes(MAX_INACTIVITY_MINUTES), MAX_INACTIVITY_MINUTES);
+  assert.throws(() => normalizeInactivityMinutes(-1));
+  assert.throws(() => normalizeInactivityMinutes(MAX_INACTIVITY_MINUTES + 1));
+
+  const base = 1_700_000_000_000;
+  // 30 minutos configurados: bloqueia aos 29 min, libera aos 30 min
+  assert.equal(shouldSendAutomaticReply({
+    onlyRecipientInitiated: true,
+    inactivityMinutes: 30,
+    receivedAt: base + 29 * 60 * 1000,
+    lastInboundAt: base
+  }), false);
+  assert.equal(shouldSendAutomaticReply({
+    onlyRecipientInitiated: true,
+    inactivityMinutes: 30,
+    receivedAt: base + 30 * 60 * 1000,
+    lastInboundAt: base
+  }), true);
+  // 00 00 00 (0 min): libera imediatamente
+  assert.equal(shouldSendAutomaticReply({
+    onlyRecipientInitiated: true,
+    inactivityMinutes: 0,
+    receivedAt: base + 1000,
+    lastInboundAt: base
+  }), true);
+
+  // Persistência via saveWhatsAppAutomation
+  const h = createHarness();
+  const saved = await h.saveAutomation({
+    auth: { uid: "admin", token: { email: "eamgfn4ever@gmail.com" } },
+    data: {
+      phoneNumberId: appA.phoneNumberId,
+      botMessages: [{ id: "m-inatividade", name: "MENSAGEM 1", blocks: [{ type: "text", text: "Olá!" }] }],
+      activeBotMessageId: "m-inatividade",
+      onlyRecipientInitiated: true,
+      inactivityMinutes: 45
+    }
+  });
+  assert.equal(saved.number.inactivityMinutes, 45);
+  assert.equal(h.documents.get(`whatsappNumbers/${appA.phoneNumberId}`).inactivityMinutes, 45);
+
+  await assert.rejects(
+    h.saveAutomation({
+      auth: { uid: "admin", token: { email: "eamgfn4ever@gmail.com" } },
+      data: {
+        phoneNumberId: appA.phoneNumberId,
+        botMessages: [],
+        activeBotMessageId: "",
+        onlyRecipientInitiated: true,
+        inactivityMinutes: MAX_INACTIVITY_MINUTES + 1
+      }
+    }),
+    (error) => error.code === "invalid-argument"
+  );
+});
